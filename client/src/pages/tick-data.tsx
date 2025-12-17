@@ -241,11 +241,17 @@ export default function TickData() {
       };
 
       xhr.onerror = () => {
-        setUploadError("Upload failed. Check file size and format.");
+        setUploadError("Upload failed. Check your connection and try again.");
+        setUploading(false);
+      };
+
+      xhr.ontimeout = () => {
+        setUploadError("Upload timed out. Try a smaller file or check your connection.");
         setUploading(false);
       };
 
       xhr.open("POST", "/api/ticks/upload");
+      xhr.timeout = 600000; // 10 minute timeout for large files
       xhr.send(formData);
     } catch (err) {
       setUploadError("Failed to upload file");

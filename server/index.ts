@@ -6,6 +6,10 @@ import { createServer } from "http";
 const app = express();
 const httpServer = createServer(app);
 
+// Increase timeout for large file uploads
+httpServer.timeout = 600000; // 10 minutes
+httpServer.keepAliveTimeout = 600000;
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;

@@ -21,6 +21,28 @@ const upload = multer({
   limits: { fileSize: 500 * 1024 * 1024 }, // 500MB max
 });
 
+// Chunked upload storage - stores chunks until finalized
+const chunkUploadStore = new Map<string, { 
+  chunks: Map<number, string>;
+  totalChunks: number;
+  fileName: string;
+  startedAt: Date;
+}>();
+
+// Cleanup old incomplete uploads after 30 minutes
+setInterval(() => {
+  const now = Date.now();
+  Array.from(chunkUploadStore.entries()).forEach(([id, uploadData]) => {
+    if (now - uploadData.startedAt.getTime() > 30 * 60 * 1000) {
+      // Clean up chunk files
+      Array.from(uploadData.chunks.values()).forEach(chunkPath => {
+        fs.unlink(chunkPath, () => {});
+      });
+      chunkUploadStore.delete(id);
+    }
+  });
+}, 5 * 60 * 1000); // Check every 5 minutes
+
 const runBacktestRequestSchema = z.object({
   tickDataId: z.string(),
   tickFormat: tickFormatSchema,
@@ -180,6 +202,160 @@ export async function registerRoutes(
       return res.status(500).json({
         error: "Upload failed",
         message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Chunked upload - initialize
+  app.post("/api/ticks/upload/init", (req, res) => {
+    try {
+      const { fileName, totalChunks } = req.body;
+      
+      if (!fileName || !totalChunks || totalChunks < 1) {
+        return res.status(400).json({ error: "Invalid upload parameters" });
+      }
+      
+      const uploadId = crypto.randomUUID();
+      chunkUploadStore.set(uploadId, {
+        chunks: new Map(),
+        totalChunks,
+        fileName,
+        startedAt: new Date(),
+      });
+      
+      return res.json({ uploadId });
+    } catch (error) {
+      console.error("Init upload error:", error);
+      return res.status(500).json({ error: "Failed to initialize upload" });
+    }
+  });
+
+  // Chunked upload - receive chunk
+  app.post("/api/ticks/upload/chunk", upload.single("chunk"), async (req, res) => {
+    try {
+      const uploadId = req.body.uploadId;
+      const chunkIndex = parseInt(req.body.chunkIndex, 10);
+      
+      if (!uploadId || isNaN(chunkIndex) || !req.file) {
+        return res.status(400).json({ error: "Invalid chunk data" });
+      }
+      
+      const uploadData = chunkUploadStore.get(uploadId);
+      if (!uploadData) {
+        return res.status(404).json({ error: "Upload session not found" });
+      }
+      
+      uploadData.chunks.set(chunkIndex, req.file.path);
+      
+      return res.json({ 
+        received: chunkIndex, 
+        total: uploadData.totalChunks,
+        complete: uploadData.chunks.size === uploadData.totalChunks
+      });
+    } catch (error) {
+      console.error("Chunk upload error:", error);
+      return res.status(500).json({ error: "Failed to receive chunk" });
+    }
+  });
+
+  // Chunked upload - finalize and combine
+  app.post("/api/ticks/upload/finalize", async (req, res) => {
+    try {
+      const { uploadId } = req.body;
+      
+      const uploadData = chunkUploadStore.get(uploadId);
+      if (!uploadData) {
+        return res.status(404).json({ error: "Upload session not found" });
+      }
+      
+      if (uploadData.chunks.size !== uploadData.totalChunks) {
+        return res.status(400).json({ 
+          error: "Upload incomplete",
+          received: uploadData.chunks.size,
+          expected: uploadData.totalChunks
+        });
+      }
+      
+      // Combine chunks into final file
+      const finalPath = `/tmp/tick-uploads/${uploadId}-combined`;
+      const writeStream = fs.createWriteStream(finalPath);
+      
+      for (let i = 0; i < uploadData.totalChunks; i++) {
+        const chunkPath = uploadData.chunks.get(i);
+        if (!chunkPath) {
+          writeStream.close();
+          return res.status(400).json({ error: `Missing chunk ${i}` });
+        }
+        
+        const chunkData = fs.readFileSync(chunkPath);
+        writeStream.write(chunkData);
+        
+        // Clean up chunk file
+        fs.unlinkSync(chunkPath);
+      }
+      
+      writeStream.end();
+      
+      // Wait for write to complete
+      await new Promise<void>((resolve, reject) => {
+        writeStream.on("finish", resolve);
+        writeStream.on("error", reject);
+      });
+      
+      // Process the combined file (count rows, get samples)
+      let rowCount = 0;
+      const sampleRows: string[] = [];
+      
+      await new Promise<void>((resolve, reject) => {
+        const stream = createReadStream(finalPath, { encoding: "utf-8" });
+        let buffer = "";
+        
+        stream.on("data", (chunk: string) => {
+          buffer += chunk;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          
+          for (const line of lines) {
+            if (line.trim()) {
+              rowCount++;
+              if (sampleRows.length < 10) {
+                sampleRows.push(line.trim());
+              }
+            }
+          }
+        });
+        
+        stream.on("end", () => {
+          if (buffer.trim()) {
+            rowCount++;
+            if (sampleRows.length < 10) {
+              sampleRows.push(buffer.trim());
+            }
+          }
+          resolve();
+        });
+        
+        stream.on("error", reject);
+      });
+      
+      const id = crypto.randomUUID();
+      tickDataStore.add({
+        id,
+        filePath: finalPath,
+        rowCount,
+        sampleRows,
+        uploadedAt: new Date(),
+      });
+      
+      // Clean up upload session
+      chunkUploadStore.delete(uploadId);
+      
+      return res.json({ id, rowCount, sampleRows });
+    } catch (error) {
+      console.error("Finalize upload error:", error);
+      return res.status(500).json({ 
+        error: "Failed to finalize upload",
+        message: error instanceof Error ? error.message : "Unknown error"
       });
     }
   });

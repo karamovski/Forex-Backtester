@@ -206,6 +206,64 @@ export default function TickData() {
   const [timeFormat, setTimeFormat] = useState(tickFormat?.timeFormat || "HH:mm:ss");
   const [hasHeader, setHasHeader] = useState(tickFormat?.hasHeader ?? false);
 
+  const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks to stay well under limit
+
+  const uploadChunked = async (file: File) => {
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    
+    // Initialize chunked upload
+    const initRes = await fetch("/api/ticks/upload/init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName: file.name, totalChunks }),
+    });
+    
+    if (!initRes.ok) {
+      throw new Error("Failed to initialize upload");
+    }
+    
+    const { uploadId } = await initRes.json();
+    
+    // Upload each chunk
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
+      
+      const formData = new FormData();
+      formData.append("chunk", chunk);
+      formData.append("uploadId", uploadId);
+      formData.append("chunkIndex", i.toString());
+      
+      const chunkRes = await fetch("/api/ticks/upload/chunk", {
+        method: "POST",
+        body: formData,
+      });
+      
+      if (!chunkRes.ok) {
+        throw new Error(`Failed to upload chunk ${i + 1}/${totalChunks}`);
+      }
+      
+      // Update progress (leave 5% for finalization)
+      const progress = Math.round(((i + 1) / totalChunks) * 95);
+      setUploadProgress(progress);
+    }
+    
+    // Finalize upload
+    const finalRes = await fetch("/api/ticks/upload/finalize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uploadId }),
+    });
+    
+    if (!finalRes.ok) {
+      const errData = await finalRes.json().catch(() => ({}));
+      throw new Error(errData.message || "Failed to finalize upload");
+    }
+    
+    return await finalRes.json();
+  };
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -215,52 +273,15 @@ export default function TickData() {
     setUploadError(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const xhr = new XMLHttpRequest();
-      
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          const percent = Math.round((event.loaded / event.total) * 100);
-          setUploadProgress(percent);
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status === 200) {
-          try {
-            const response = JSON.parse(xhr.responseText);
-            setTickDataId(response.id);
-            setTickSampleRows(response.sampleRows);
-            setTickDataLoaded(true, response.rowCount);
-            setUploadProgress(100);
-          } catch (e) {
-            setUploadError("Failed to process server response");
-          }
-        } else {
-          const errorDetail = xhr.responseText ? `: ${xhr.responseText}` : ` (status ${xhr.status})`;
-          setUploadError("Upload failed" + errorDetail);
-        }
-        setUploading(false);
-      };
-
-      xhr.onerror = () => {
-        // Network error - connection was cut off
-        setUploadError("Connection lost during upload. Large files (100MB+) may exceed server limits. Try splitting the file.");
-        setUploading(false);
-      };
-
-      xhr.ontimeout = () => {
-        setUploadError("Upload timed out. Try a smaller file or check your connection.");
-        setUploading(false);
-      };
-
-      xhr.open("POST", "/api/ticks/upload");
-      xhr.timeout = 600000; // 10 minute timeout for large files
-      xhr.send(formData);
+      // Use chunked upload for all files (safer for any size)
+      const response = await uploadChunked(file);
+      setTickDataId(response.id);
+      setTickSampleRows(response.sampleRows);
+      setTickDataLoaded(true, response.rowCount);
+      setUploadProgress(100);
+      setUploading(false);
     } catch (err) {
-      setUploadError("Failed to upload file");
+      setUploadError(err instanceof Error ? err.message : "Failed to upload file");
       setUploading(false);
     }
   };

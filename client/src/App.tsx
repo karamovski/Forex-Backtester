@@ -13,6 +13,7 @@ import Strategy from "@/pages/strategy";
 import RiskManagement from "@/pages/risk";
 import Backtest from "@/pages/backtest";
 import Results from "@/pages/results";
+import Optimize from "@/pages/optimize";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -24,6 +25,7 @@ function Router() {
       <Route path="/risk" component={RiskManagement} />
       <Route path="/backtest" component={Backtest} />
       <Route path="/results" component={Results} />
+      <Route path="/optimize" component={Optimize} />
       <Route component={NotFound} />
     </Switch>
   );

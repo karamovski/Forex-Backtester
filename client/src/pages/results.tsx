@@ -8,21 +8,32 @@ import {
   Target,
   ArrowUpRight,
   ArrowDownRight,
+  Download,
+  FileSpreadsheet,
+  FileJson,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useBacktestStore } from "@/lib/backtest-store";
 import {
-  LineChart,
-  Line,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useBacktestStore } from "@/lib/backtest-store";
+import { useToast } from "@/hooks/use-toast";
+import type { BacktestResults, TradeResult } from "@shared/schema";
+import {
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  AreaChart,
   Area,
+  Scatter,
+  ComposedChart,
 } from "recharts";
 
 function formatCurrency(value: number): string {
@@ -85,8 +96,244 @@ function StatCard({ label, value, subValue, icon: Icon, trend }: StatCardProps) 
   );
 }
 
+function generateCSV(results: BacktestResults): string {
+  const headers = [
+    "Trade ID",
+    "Symbol",
+    "Direction",
+    "Entry Price",
+    "Entry Time",
+    "Exit Price",
+    "Exit Time",
+    "Exit Reason",
+    "Lot Size",
+    "Pips",
+    "Profit/Loss",
+    "Balance",
+  ];
+  
+  const rows = results.trades.map((trade) => [
+    trade.id,
+    trade.symbol,
+    trade.direction.toUpperCase(),
+    trade.entryPrice.toFixed(5),
+    trade.entryTime,
+    trade.exitPrice.toFixed(5),
+    trade.exitTime,
+    trade.exitReason.toUpperCase(),
+    trade.lotSize.toFixed(2),
+    trade.pips.toFixed(1),
+    trade.profit.toFixed(2),
+    trade.balance.toFixed(2),
+  ]);
+  
+  const summaryRows = [
+    [],
+    ["SUMMARY"],
+    ["Initial Balance", results.initialBalance.toFixed(2)],
+    ["Final Balance", results.finalBalance.toFixed(2)],
+    ["Total Trades", results.totalTrades.toString()],
+    ["Winning Trades", results.winningTrades.toString()],
+    ["Losing Trades", results.losingTrades.toString()],
+    ["Win Rate", `${results.winRate.toFixed(2)}%`],
+    ["Total Pips", results.totalPips.toFixed(1)],
+    ["Profit Factor", results.profitFactor.toFixed(2)],
+    ["Max Drawdown (Equity)", `${results.maxDrawdownEquityPercent.toFixed(2)}%`],
+    ["Max Drawdown (Balance)", `${results.maxDrawdownBalancePercent.toFixed(2)}%`],
+    ["Average Win", results.averageWin.toFixed(2)],
+    ["Average Loss", results.averageLoss.toFixed(2)],
+    ["Largest Win", results.largestWin.toFixed(2)],
+    ["Largest Loss", results.largestLoss.toFixed(2)],
+  ];
+  
+  const symbolStats = getSymbolStats(results);
+  const symbolList = Object.values(symbolStats);
+  
+  const symbolRows: string[][] = [];
+  if (symbolList.length > 1) {
+    symbolRows.push([]);
+    symbolRows.push(["PERFORMANCE BY SYMBOL"]);
+    symbolRows.push(["Symbol", "Trades", "Wins", "Losses", "Win Rate", "Total Pips", "Total Profit"]);
+    symbolList.forEach(s => {
+      const winRate = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
+      symbolRows.push([
+        s.symbol,
+        s.trades.toString(),
+        s.wins.toString(),
+        s.losses.toString(),
+        `${winRate.toFixed(1)}%`,
+        s.totalPips.toFixed(1),
+        s.totalProfit.toFixed(2),
+      ]);
+    });
+    
+    const correlations = getSymbolCorrelations(results.trades);
+    if (correlations.length > 0) {
+      symbolRows.push([]);
+      symbolRows.push(["CORRELATION ANALYSIS"]);
+      symbolRows.push(["Symbol Pair", "Correlation"]);
+      correlations.forEach(c => {
+        symbolRows.push([c.pair, c.correlation.toFixed(3)]);
+      });
+    }
+  }
+  
+  const csvContent = [
+    headers.join(","),
+    ...rows.map((row) => row.join(",")),
+    ...summaryRows.map((row) => row.join(",")),
+    ...symbolRows.map((row) => row.join(",")),
+  ].join("\n");
+  
+  return csvContent;
+}
+
+function getSymbolStats(results: BacktestResults) {
+  return results.trades.reduce((acc, trade) => {
+    if (!acc[trade.symbol]) {
+      acc[trade.symbol] = {
+        symbol: trade.symbol,
+        trades: 0,
+        wins: 0,
+        losses: 0,
+        totalProfit: 0,
+        totalPips: 0,
+      };
+    }
+    acc[trade.symbol].trades++;
+    if (trade.profit >= 0) {
+      acc[trade.symbol].wins++;
+    } else {
+      acc[trade.symbol].losses++;
+    }
+    acc[trade.symbol].totalProfit += trade.profit;
+    acc[trade.symbol].totalPips += trade.pips;
+    return acc;
+  }, {} as Record<string, { symbol: string; trades: number; wins: number; losses: number; totalProfit: number; totalPips: number }>);
+}
+
+function calculateCorrelation(arr1: number[], arr2: number[]): number {
+  const n = Math.min(arr1.length, arr2.length);
+  if (n < 2) return 0;
+  
+  const mean1 = arr1.slice(0, n).reduce((a, b) => a + b, 0) / n;
+  const mean2 = arr2.slice(0, n).reduce((a, b) => a + b, 0) / n;
+  
+  let numerator = 0;
+  let denom1 = 0;
+  let denom2 = 0;
+  
+  for (let i = 0; i < n; i++) {
+    const d1 = arr1[i] - mean1;
+    const d2 = arr2[i] - mean2;
+    numerator += d1 * d2;
+    denom1 += d1 * d1;
+    denom2 += d2 * d2;
+  }
+  
+  if (denom1 === 0 || denom2 === 0) return 0;
+  return numerator / Math.sqrt(denom1 * denom2);
+}
+
+function getSymbolCorrelations(trades: TradeResult[]) {
+  const symbols = [...new Set(trades.map(t => t.symbol))];
+  if (symbols.length < 2) return [];
+  
+  const symbolProfits: Record<string, number[]> = {};
+  symbols.forEach(s => { symbolProfits[s] = []; });
+  trades.forEach(t => { symbolProfits[t.symbol].push(t.profit); });
+  
+  const correlations: Array<{ pair: string; correlation: number }> = [];
+  for (let i = 0; i < symbols.length; i++) {
+    for (let j = i + 1; j < symbols.length; j++) {
+      const corr = calculateCorrelation(symbolProfits[symbols[i]], symbolProfits[symbols[j]]);
+      correlations.push({
+        pair: `${symbols[i]} / ${symbols[j]}`,
+        correlation: corr,
+      });
+    }
+  }
+  return correlations.sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
+}
+
+function generateJSON(results: BacktestResults): string {
+  const symbolStats = getSymbolStats(results);
+  const symbolList = Object.values(symbolStats);
+  const correlations = getSymbolCorrelations(results.trades);
+  
+  const exportData = {
+    summary: {
+      initialBalance: results.initialBalance,
+      finalBalance: results.finalBalance,
+      totalTrades: results.totalTrades,
+      winningTrades: results.winningTrades,
+      losingTrades: results.losingTrades,
+      winRate: results.winRate,
+      totalPips: results.totalPips,
+      profitFactor: results.profitFactor,
+      maxDrawdownEquity: results.maxDrawdownEquity,
+      maxDrawdownEquityPercent: results.maxDrawdownEquityPercent,
+      maxDrawdownBalance: results.maxDrawdownBalance,
+      maxDrawdownBalancePercent: results.maxDrawdownBalancePercent,
+      averageWin: results.averageWin,
+      averageLoss: results.averageLoss,
+      largestWin: results.largestWin,
+      largestLoss: results.largestLoss,
+    },
+    symbolBreakdown: symbolList.map(s => ({
+      symbol: s.symbol,
+      trades: s.trades,
+      wins: s.wins,
+      losses: s.losses,
+      winRate: s.trades > 0 ? (s.wins / s.trades) * 100 : 0,
+      totalProfit: s.totalProfit,
+      totalPips: s.totalPips,
+    })),
+    correlationAnalysis: correlations,
+    trades: results.trades,
+    equityCurve: results.equityCurve,
+  };
+  
+  return JSON.stringify(exportData, null, 2);
+}
+
+function downloadFile(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export default function Results() {
   const { results, risk } = useBacktestStore();
+  const { toast } = useToast();
+
+  const handleExportCSV = () => {
+    if (!results) return;
+    const csv = generateCSV(results);
+    const timestamp = new Date().toISOString().split("T")[0];
+    downloadFile(csv, `backtest-report-${timestamp}.csv`, "text/csv");
+    toast({
+      title: "Export Successful",
+      description: "CSV report downloaded successfully",
+    });
+  };
+
+  const handleExportJSON = () => {
+    if (!results) return;
+    const json = generateJSON(results);
+    const timestamp = new Date().toISOString().split("T")[0];
+    downloadFile(json, `backtest-report-${timestamp}.json`, "application/json");
+    toast({
+      title: "Export Successful",
+      description: "JSON report downloaded successfully",
+    });
+  };
 
   if (!results) {
     return (
@@ -117,27 +364,55 @@ export default function Results() {
   const profitLossPercent = (profitLoss / results.initialBalance) * 100;
   const isProfit = profitLoss >= 0;
 
-  const chartData = results.equityCurve.map((point) => ({
-    ...point,
-    time: new Date(point.time).toLocaleDateString(),
-  }));
+  const chartData = results.equityCurve.map((point, index) => {
+    const trade = results.trades.find(
+      (t) => t.balance === point.equity && index > 0
+    );
+    return {
+      ...point,
+      time: new Date(point.time).toLocaleDateString(),
+      tradeResult: trade?.profit !== undefined ? (trade.profit >= 0 ? "win" : "loss") : undefined,
+      tradeSymbol: trade?.symbol,
+      tradeProfit: trade?.profit,
+    };
+  });
 
   return (
     <div className="flex flex-col gap-6 p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Backtest Results</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Simulated performance analysis from {results.totalTrades} trades
           </p>
         </div>
-        <Badge
-          variant={isProfit ? "default" : "destructive"}
-          className="text-sm px-3 py-1 gap-1"
-        >
-          {isProfit ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-          {formatPercent(profitLossPercent)}
-        </Badge>
+        <div className="flex items-center gap-3">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2" data-testid="button-export">
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleExportCSV} data-testid="button-export-csv">
+                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                Export as CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportJSON} data-testid="button-export-json">
+                <FileJson className="h-4 w-4 mr-2" />
+                Export as JSON
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Badge
+            variant={isProfit ? "default" : "destructive"}
+            className="text-sm px-3 py-1 gap-1"
+          >
+            {isProfit ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+            {formatPercent(profitLossPercent)}
+          </Badge>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -180,7 +455,7 @@ export default function Results() {
           <CardContent>
             <div className="h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData}>
+                <ComposedChart data={chartData}>
                   <defs>
                     <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop
@@ -213,7 +488,19 @@ export default function Results() {
                       borderRadius: "6px",
                     }}
                     labelStyle={{ color: "hsl(var(--foreground))" }}
-                    formatter={(value: number) => [formatCurrency(value), "Equity"]}
+                    formatter={(value: number, name: string, props: { payload?: { tradeSymbol?: string; tradeProfit?: number; tradeResult?: string } }) => {
+                      const payload = props?.payload;
+                      if (name === "equity" && payload?.tradeSymbol && payload?.tradeProfit !== undefined) {
+                        return [
+                          `${formatCurrency(value)} (${payload.tradeSymbol}: ${payload.tradeProfit >= 0 ? "+" : ""}${formatCurrency(payload.tradeProfit)})`,
+                          "Equity"
+                        ];
+                      }
+                      if (name === "equity") {
+                        return [formatCurrency(value), "Equity"];
+                      }
+                      return null;
+                    }}
                   />
                   <Area
                     type="monotone"
@@ -222,7 +509,26 @@ export default function Results() {
                     strokeWidth={2}
                     fill="url(#equityGradient)"
                   />
-                </AreaChart>
+                  <Scatter
+                    dataKey="equity"
+                    data={chartData.filter(p => p.tradeResult)}
+                    shape={(props: { cx?: number; cy?: number; payload?: { tradeResult?: string } }) => {
+                      const { cx, cy, payload } = props;
+                      if (cx === undefined || cy === undefined) return null;
+                      const isWin = payload?.tradeResult === "win";
+                      return (
+                        <circle
+                          cx={cx}
+                          cy={cy}
+                          r={5}
+                          fill={isWin ? "hsl(142 76% 36%)" : "hsl(0 84% 60%)"}
+                          stroke="hsl(var(--background))"
+                          strokeWidth={2}
+                        />
+                      );
+                    }}
+                  />
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
@@ -284,6 +590,116 @@ export default function Results() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Multi-Currency Pair Analysis */}
+      {(() => {
+        const symbolStats = getSymbolStats(results);
+        const symbolList = Object.values(symbolStats).sort((a, b) => b.totalProfit - a.totalProfit);
+
+        if (symbolList.length > 1) {
+          return (
+            <Card data-testid="card-symbol-analysis">
+              <CardHeader className="pb-4">
+                <CardTitle className="text-lg">Performance by Symbol</CardTitle>
+                <CardDescription>Breakdown of results for each traded instrument</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {symbolList.map((stat, index) => {
+                    const winRate = stat.trades > 0 ? (stat.wins / stat.trades) * 100 : 0;
+                    const isProfitable = stat.totalProfit >= 0;
+                    return (
+                      <div
+                        key={stat.symbol}
+                        className="p-4 rounded-md border"
+                        data-testid={`card-symbol-${index}`}
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-semibold" data-testid={`text-symbol-name-${index}`}>{stat.symbol}</span>
+                          <Badge
+                            variant="secondary"
+                            className={isProfitable ? "bg-green-500/10 text-green-600 dark:text-green-400" : "bg-red-500/10 text-red-600 dark:text-red-400"}
+                            data-testid={`text-symbol-profit-${index}`}
+                          >
+                            {isProfitable ? "+" : ""}{formatCurrency(stat.totalProfit)}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Trades:</span>
+                            <span className="font-mono ml-2" data-testid={`text-symbol-trades-${index}`}>{stat.trades}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Win Rate:</span>
+                            <span className="font-mono ml-2" data-testid={`text-symbol-winrate-${index}`}>{winRate.toFixed(0)}%</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">W/L:</span>
+                            <span className="font-mono ml-2" data-testid={`text-symbol-wl-${index}`}>{stat.wins}/{stat.losses}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Pips:</span>
+                            <span className={`font-mono ml-2 ${stat.totalPips >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`} data-testid={`text-symbol-pips-${index}`}>
+                              {stat.totalPips >= 0 ? "+" : ""}{stat.totalPips.toFixed(1)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                {/* Correlation Analysis */}
+                {(() => {
+                  const correlations = getSymbolCorrelations(results.trades);
+                  if (correlations.length > 0) {
+                    return (
+                      <div className="mt-6 pt-4 border-t">
+                        <h4 className="text-sm font-medium mb-3">Symbol Correlation</h4>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          {correlations.map((corr, idx) => {
+                            const absCorr = Math.abs(corr.correlation);
+                            const corrColor = 
+                              absCorr > 0.7 ? "text-red-600 dark:text-red-400" :
+                              absCorr > 0.4 ? "text-yellow-600 dark:text-yellow-400" :
+                              "text-green-600 dark:text-green-400";
+                            const corrLabel = 
+                              absCorr > 0.7 ? "Strong" :
+                              absCorr > 0.4 ? "Moderate" :
+                              "Weak";
+                            return (
+                              <div 
+                                key={corr.pair} 
+                                className="flex items-center justify-between p-2 rounded-md bg-muted/50"
+                                data-testid={`correlation-pair-${idx}`}
+                              >
+                                <span className="text-sm">{corr.pair}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className={`font-mono text-sm ${corrColor}`} data-testid={`correlation-value-${idx}`}>
+                                    {corr.correlation >= 0 ? "+" : ""}{corr.correlation.toFixed(2)}
+                                  </span>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {corrLabel}
+                                  </Badge>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Correlation measures how symbol profits move together. High correlation (&gt;0.7) suggests similar risk exposure.
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </CardContent>
+            </Card>
+          );
+        }
+        return null;
+      })()}
 
       <Card>
         <CardHeader className="pb-4">

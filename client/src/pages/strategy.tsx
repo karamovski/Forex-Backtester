@@ -1,4 +1,4 @@
-import { Settings2, Target, Shield, TrendingUp, HelpCircle } from "lucide-react";
+import { Settings2, Target, Shield, TrendingUp, HelpCircle, Layers, Check } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -8,11 +8,29 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useBacktestStore } from "@/lib/backtest-store";
+import { STRATEGY_TEMPLATES, getCategoryColor, type StrategyTemplate } from "@/lib/strategy-templates";
+import { useToast } from "@/hooks/use-toast";
+import { useState } from "react";
 
 export default function Strategy() {
-  const { strategy, setStrategy } = useBacktestStore();
+  const { strategy, setStrategy, setRisk } = useBacktestStore();
+  const { toast } = useToast();
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+
+  const handleLoadTemplate = (template: StrategyTemplate) => {
+    setStrategy(template.strategy);
+    if (template.risk) {
+      setRisk(template.risk);
+    }
+    setSelectedTemplate(template.id);
+    toast({
+      title: "Template Loaded",
+      description: `Applied "${template.name}" strategy and risk settings`,
+    });
+  };
 
   const handleTPToggle = (tp: number, checked: boolean) => {
     const activeTPs = checked
@@ -45,6 +63,52 @@ export default function Strategy() {
           Configure your trade management rules and exit strategies
         </p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center gap-2">
+            <Layers className="h-5 w-5 text-muted-foreground" />
+            <CardTitle className="text-lg">Strategy Templates</CardTitle>
+          </div>
+          <CardDescription>
+            Quick-load pre-configured strategies with matching risk settings
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {STRATEGY_TEMPLATES.map((template) => (
+              <div
+                key={template.id}
+                className={`relative p-4 rounded-md border cursor-pointer transition-colors hover-elevate ${
+                  selectedTemplate === template.id
+                    ? "border-primary bg-primary/5"
+                    : "border-border"
+                }`}
+                onClick={() => handleLoadTemplate(template)}
+                data-testid={`template-${template.id}`}
+              >
+                {selectedTemplate === template.id && (
+                  <div className="absolute top-2 right-2">
+                    <Check className="h-4 w-4 text-primary" />
+                  </div>
+                )}
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="font-medium text-sm">{template.name}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">
+                  {template.description}
+                </p>
+                <Badge
+                  variant="secondary"
+                  className={`text-xs capitalize ${getCategoryColor(template.category)}`}
+                >
+                  {template.category}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

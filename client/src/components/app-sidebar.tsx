@@ -1,4 +1,4 @@
-import { Database, FileText, Settings2, TrendingUp, DollarSign, Play, BarChart3 } from "lucide-react";
+import { Database, FileText, Settings2, TrendingUp, DollarSign, Play, BarChart3, Sliders } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
   Sidebar,
@@ -52,6 +52,12 @@ const actionItems = [
     url: "/results",
     icon: BarChart3,
     description: "View performance",
+  },
+  {
+    title: "Optimize",
+    url: "/optimize",
+    icon: Sliders,
+    description: "Parameter optimization",
   },
 ];
 

@@ -21,10 +21,13 @@ interface OpenTrade {
   entryPrice: number;
   entryTime: Date;
   currentSL: number;
-  lotSize: number;
+  initialLotSize: number;
+  remainingLots: number;
   highestPrice: number;
   lowestPrice: number;
   tpHits: number[];
+  realizedProfit: number;
+  weightedPips: number;
 }
 
 function getPipValue(symbol: string): number {
@@ -74,7 +77,6 @@ function parseTimestamp(dateStr: string, timeStr: string, dateFormat: string, ti
   let year = 2024, month = 1, day = 1;
   let hours = 0, minutes = 0, seconds = 0;
   
-  // Parse date
   if (dateFormat === "YYYY-MM-DD" || dateFormat === "YYYY.MM.DD") {
     const parts = dateStr.split(/[-./]/);
     year = parseInt(parts[0]) || 2024;
@@ -92,7 +94,6 @@ function parseTimestamp(dateStr: string, timeStr: string, dateFormat: string, ti
     year = parseInt(parts[2]) || 2024;
   }
   
-  // Parse time
   const timeParts = timeStr.split(/[:.]/).map(p => parseInt(p) || 0);
   hours = timeParts[0] || 0;
   minutes = timeParts[1] || 0;
@@ -102,7 +103,6 @@ function parseTimestamp(dateStr: string, timeStr: string, dateFormat: string, ti
 }
 
 function parseSignalTimestamp(timestamp: string): Date {
-  // Handle formats like "2025-10-27 14:46:30"
   const parts = timestamp.split(/[\s]+/);
   const datePart = parts[0];
   const timePart = parts[1] || "00:00:00";
@@ -157,7 +157,6 @@ async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGe
     }
   }
 
-  // Process remaining buffer
   if (buffer.trim()) {
     const cols = buffer.split(tickFormat.delimiter);
     const dateStr = cols[tickFormat.dateColumn]?.trim() || "";
@@ -184,7 +183,6 @@ export async function runBacktest(
     throw new Error("No signals provided for backtesting");
   }
 
-  // Sort signals by timestamp
   const sortedSignals = [...signals]
     .filter(s => s.timestamp)
     .sort((a, b) => {
@@ -228,13 +226,11 @@ export async function runBacktest(
       console.log(`Processed ${tickCount.toLocaleString()} ticks, ${trades.length} trades completed`);
     }
 
-    // Check if we should open new trades
     while (signalIndex < sortedSignals.length) {
       const signal = sortedSignals[signalIndex];
       const signalTime = parseSignalTimestamp(signal.timestamp!);
 
       if (tick.timestamp >= signalTime) {
-        // Open the trade
         const entryPrice = signal.direction === "buy" ? tick.ask : tick.bid;
         const slPips = Math.abs(calculatePips(entryPrice, signal.stopLoss, signal.direction, signal.symbol));
         const lotSize = calculateLotSize(riskConfig, balance, slPips, signal.symbol);
@@ -245,10 +241,13 @@ export async function runBacktest(
           entryPrice,
           entryTime: tick.timestamp,
           currentSL: signal.stopLoss,
-          lotSize,
+          initialLotSize: lotSize,
+          remainingLots: lotSize,
           highestPrice: entryPrice,
           lowestPrice: entryPrice,
           tpHits: [],
+          realizedProfit: 0,
+          weightedPips: 0,
         });
 
         signalIndex++;
@@ -257,45 +256,19 @@ export async function runBacktest(
       }
     }
 
-    // Check open trades for SL/TP hits
+    const tradesToClose: string[] = [];
+
     for (const [tradeId, trade] of Array.from(openTrades.entries())) {
-      const { signal, entryPrice, currentSL, lotSize } = trade;
-      const exitPrice = signal.direction === "buy" ? tick.bid : tick.ask;
-      const currentPrice = signal.direction === "buy" ? tick.bid : tick.ask;
+      const { signal, entryPrice } = trade;
+      const currentBid = tick.bid;
+      const currentAsk = tick.ask;
 
-      // Update highest/lowest for trailing SL
       if (signal.direction === "buy") {
-        trade.highestPrice = Math.max(trade.highestPrice, tick.bid);
+        trade.highestPrice = Math.max(trade.highestPrice, currentBid);
       } else {
-        trade.lowestPrice = Math.min(trade.lowestPrice, tick.ask);
+        trade.lowestPrice = Math.min(trade.lowestPrice, currentAsk);
       }
 
-      // Check for SL hit
-      let slHit = false;
-      if (signal.direction === "buy" && tick.bid <= currentSL) {
-        slHit = true;
-      } else if (signal.direction === "sell" && tick.ask >= currentSL) {
-        slHit = true;
-      }
-
-      // Check for TP hits
-      let tpHit: number | null = null;
-      for (let i = 0; i < signal.takeProfits.length; i++) {
-        const tpLevel = i + 1;
-        if (!strategy.activeTPs.includes(tpLevel)) continue;
-        if (trade.tpHits.includes(tpLevel)) continue;
-
-        const tp = signal.takeProfits[i];
-        if (signal.direction === "buy" && tick.bid >= tp) {
-          tpHit = tpLevel;
-          break;
-        } else if (signal.direction === "sell" && tick.ask <= tp) {
-          tpHit = tpLevel;
-          break;
-        }
-      }
-
-      // Handle trailing SL
       if (strategy.trailingSL && strategy.trailingPips) {
         const pipValue = getPipValue(signal.symbol);
         const trailDistance = strategy.trailingPips * pipValue;
@@ -313,7 +286,6 @@ export async function runBacktest(
         }
       }
 
-      // Handle move SL to entry after TP
       if (strategy.moveSLToEntry && strategy.moveSLAfterTP && trade.tpHits.length >= strategy.moveSLAfterTP) {
         if (signal.direction === "buy" && trade.currentSL < entryPrice) {
           trade.currentSL = entryPrice;
@@ -322,56 +294,31 @@ export async function runBacktest(
         }
       }
 
-      // Process exits
-      let exitReason: "tp1" | "tp2" | "tp3" | "tp4" | "sl" | "trailing_sl" | null = null;
-      let finalExitPrice = 0;
-
-      if (slHit) {
-        exitReason = strategy.trailingSL ? "trailing_sl" : "sl";
-        finalExitPrice = currentSL;
-      } else if (tpHit) {
-        trade.tpHits.push(tpHit);
-
-        if (strategy.closePartials && trade.tpHits.length < strategy.activeTPs.length) {
-          // Partial close - don't exit yet
-          continue;
-        }
-
-        if (strategy.closeAllOnTP && tpHit >= strategy.closeAllOnTP) {
-          exitReason = `tp${tpHit}` as "tp1" | "tp2" | "tp3" | "tp4";
-          finalExitPrice = signal.takeProfits[tpHit - 1];
-        } else if (!strategy.closePartials || trade.tpHits.length === strategy.activeTPs.length) {
-          exitReason = `tp${tpHit}` as "tp1" | "tp2" | "tp3" | "tp4";
-          finalExitPrice = signal.takeProfits[tpHit - 1];
-        }
+      let slHit = false;
+      let slExitPrice = 0;
+      if (signal.direction === "buy" && currentBid <= trade.currentSL) {
+        slHit = true;
+        slExitPrice = currentBid;
+      } else if (signal.direction === "sell" && currentAsk >= trade.currentSL) {
+        slHit = true;
+        slExitPrice = currentAsk;
       }
 
-      if (exitReason) {
-        openTrades.delete(tradeId);
+      if (slHit) {
+        const pips = calculatePips(entryPrice, slExitPrice, signal.direction, signal.symbol);
+        const exitProfit = calculateProfit(pips, trade.remainingLots);
+        const totalProfit = exitProfit + trade.realizedProfit;
+        const remainingWeight = trade.remainingLots / trade.initialLotSize;
+        const totalWeightedPips = trade.weightedPips + (pips * remainingWeight);
 
-        const pips = calculatePips(entryPrice, finalExitPrice, signal.direction, signal.symbol);
-        const profit = calculateProfit(pips, lotSize);
-
-        balance += profit;
+        balance += exitProfit;
         equity = balance;
 
-        if (equity > maxEquity) {
-          maxEquity = equity;
-        } else {
-          const drawdown = maxEquity - equity;
-          if (drawdown > maxDrawdownEquity) {
-            maxDrawdownEquity = drawdown;
-          }
-        }
+        if (equity > maxEquity) maxEquity = equity;
+        else if (maxEquity - equity > maxDrawdownEquity) maxDrawdownEquity = maxEquity - equity;
 
-        if (balance > maxBalance) {
-          maxBalance = balance;
-        } else {
-          const drawdown = maxBalance - balance;
-          if (drawdown > maxDrawdownBalance) {
-            maxDrawdownBalance = drawdown;
-          }
-        }
+        if (balance > maxBalance) maxBalance = balance;
+        else if (maxBalance - balance > maxDrawdownBalance) maxDrawdownBalance = maxBalance - balance;
 
         trades.push({
           id: crypto.randomUUID(),
@@ -380,12 +327,12 @@ export async function runBacktest(
           direction: signal.direction,
           entryPrice,
           entryTime: trade.entryTime.toISOString(),
-          exitPrice: finalExitPrice,
+          exitPrice: slExitPrice,
           exitTime: tick.timestamp.toISOString(),
-          exitReason,
-          lotSize,
-          pips,
-          profit,
+          exitReason: strategy.trailingSL ? "trailing_sl" : "sl",
+          lotSize: trade.initialLotSize,
+          pips: totalWeightedPips,
+          profit: totalProfit,
           balance,
           equity,
         });
@@ -395,16 +342,113 @@ export async function runBacktest(
           equity,
           balance,
         });
+
+        tradesToClose.push(tradeId);
+        continue;
+      }
+
+      for (let i = 0; i < signal.takeProfits.length; i++) {
+        const tpLevel = i + 1;
+        if (!strategy.activeTPs.includes(tpLevel)) continue;
+        if (trade.tpHits.includes(tpLevel)) continue;
+
+        const tp = signal.takeProfits[i];
+        let tpHit = false;
+        let tpExitPrice = 0;
+
+        if (signal.direction === "buy" && currentBid >= tp) {
+          tpHit = true;
+          tpExitPrice = currentBid;
+        } else if (signal.direction === "sell" && currentAsk <= tp) {
+          tpHit = true;
+          tpExitPrice = currentAsk;
+        }
+
+        if (tpHit) {
+          trade.tpHits.push(tpLevel);
+
+          const activeTpCount = strategy.activeTPs.length;
+          const remainingTps = activeTpCount - trade.tpHits.length;
+
+          const shouldCloseAll = strategy.closeAllOnTP && tpLevel >= strategy.closeAllOnTP;
+          const isFinalTp = remainingTps === 0;
+
+          if (shouldCloseAll || isFinalTp) {
+            const pips = calculatePips(entryPrice, tpExitPrice, signal.direction, signal.symbol);
+            const exitProfit = calculateProfit(pips, trade.remainingLots);
+            const totalProfit = exitProfit + trade.realizedProfit;
+            const remainingWeight = trade.remainingLots / trade.initialLotSize;
+            const totalWeightedPips = trade.weightedPips + (pips * remainingWeight);
+
+            balance += exitProfit;
+            equity = balance;
+
+            if (equity > maxEquity) maxEquity = equity;
+            else if (maxEquity - equity > maxDrawdownEquity) maxDrawdownEquity = maxEquity - equity;
+
+            if (balance > maxBalance) maxBalance = balance;
+            else if (maxBalance - balance > maxDrawdownBalance) maxDrawdownBalance = maxBalance - balance;
+
+            trades.push({
+              id: crypto.randomUUID(),
+              signalId: signal.id,
+              symbol: signal.symbol,
+              direction: signal.direction,
+              entryPrice,
+              entryTime: trade.entryTime.toISOString(),
+              exitPrice: tpExitPrice,
+              exitTime: tick.timestamp.toISOString(),
+              exitReason: `tp${tpLevel}` as "tp1" | "tp2" | "tp3" | "tp4",
+              lotSize: trade.initialLotSize,
+              pips: totalWeightedPips,
+              profit: totalProfit,
+              balance,
+              equity,
+            });
+
+            equityCurve.push({
+              time: tick.timestamp.toISOString(),
+              equity,
+              balance,
+            });
+
+            tradesToClose.push(tradeId);
+          } else if (strategy.closePartials && remainingTps > 0) {
+            const partialPercent = (strategy.partialClosePercent || 50) / 100;
+            const closeLots = trade.remainingLots * partialPercent;
+            trade.remainingLots -= closeLots;
+
+            const pips = calculatePips(entryPrice, tpExitPrice, signal.direction, signal.symbol);
+            const partialProfit = calculateProfit(pips, closeLots);
+            const partialWeight = closeLots / trade.initialLotSize;
+            
+            trade.realizedProfit += partialProfit;
+            trade.weightedPips += pips * partialWeight;
+            
+            balance += partialProfit;
+            equity = balance;
+
+            if (equity > maxEquity) maxEquity = equity;
+            else if (maxEquity - equity > maxDrawdownEquity) maxDrawdownEquity = maxEquity - equity;
+
+            if (balance > maxBalance) maxBalance = balance;
+            else if (maxBalance - balance > maxDrawdownBalance) maxDrawdownBalance = maxBalance - balance;
+          }
+
+          break;
+        }
       }
     }
 
-    // Stop if all signals processed and no open trades
+    for (const id of tradesToClose) {
+      openTrades.delete(id);
+    }
+
     if (signalIndex >= sortedSignals.length && openTrades.size === 0) {
       break;
     }
   }
 
-  // Close any remaining open trades at last known price
   console.log(`Backtest complete: ${tickCount.toLocaleString()} ticks processed, ${trades.length} trades`);
 
   const endTime = new Date();

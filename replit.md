@@ -94,3 +94,22 @@ Desktop mode benefits:
 - Native file picker dialogs
 
 See `DESKTOP_BUILD.md` for build and packaging instructions.
+
+### New Features (December 2025)
+
+#### Configuration Management
+- **Save/Load Configurations**: Store backtest settings (tick format, signal format, strategy, risk parameters) for quick reuse
+- **Location**: `/configs` page with localStorage persistence
+- **Implementation**: `client/src/lib/saved-configs.ts`, `client/src/pages/configs.tsx`
+
+#### Backtest Comparison
+- **Compare Backtests**: Side-by-side analysis of multiple backtest results
+- **History Tracking**: Automatic saving of backtest results to localStorage
+- **Location**: `/compare` page
+- **Implementation**: `client/src/lib/backtest-history.ts`, `client/src/pages/compare.tsx`
+
+#### Enhanced Visualizations
+- **Drawdown Chart**: Running drawdown from peak equity over time
+- **Monthly Returns**: Bar chart of profit/loss aggregated by month
+- **Exit Reason Distribution**: Pie chart showing how trades were closed (SL, TP1, TP2, etc.)
+- **Location**: Results page (`/results`)

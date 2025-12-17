@@ -52,7 +52,11 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
     // Add ignored placeholders for date/time (matched but not captured)
     const ignoredPlaceholders = ["{date}", "{time}", "{timestamp}"];
 
-    let regexPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // First replace spaces with a temporary marker before escaping
+    let regexPattern = pattern.replace(/ /g, "<<SPACE>>");
+    
+    // Escape special regex chars
+    regexPattern = regexPattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     
     // Replace ignored placeholders with non-capturing wildcard
     for (const ignored of ignoredPlaceholders) {
@@ -68,8 +72,8 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
       }
     }
     
-    // Replace single spaces with flexible whitespace matching
-    regexPattern = regexPattern.replace(/\\ /g, "\\s+");
+    // Replace space markers with flexible whitespace matching
+    regexPattern = regexPattern.replace(/<<SPACE>>/g, "\\s+");
     
     const regex = new RegExp(regexPattern, "i");
     const match = text.match(regex);

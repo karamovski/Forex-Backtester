@@ -13,6 +13,11 @@ import type { ParsedSignal, SignalFormat } from "@shared/schema";
 
 const EXAMPLE_FORMATS = [
   {
+    name: "Market Entry (Date/Time/Direction/SL/TP)",
+    pattern: "{date} {time} {direction} {sl} {tp1}",
+    example: "2025-09-18 14:48:18 BUY 3658 3670",
+  },
+  {
     name: "Standard Format",
     pattern: "{direction} {symbol} at {entry} sl at {sl} tp at {tp1}",
     example: "buy gold at 1234.50 sl at 1230.00 tp at 1240.00",
@@ -107,12 +112,15 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
       timestamp = groups.date;
     }
     
+    // Entry price is optional - if not provided, backtest engine uses market price at signal time
+    const entryPrice = groups.entry ? parseFloat(groups.entry) : 0;
+    
     return {
       id: crypto.randomUUID(),
       rawText: text,
       symbol: groups.symbol?.toUpperCase() || "SIGNAL",
       direction: direction as "buy" | "sell",
-      entryPrice: parseFloat(groups.entry) || parseFloat(groups.sl) || 0,
+      entryPrice,
       stopLoss: parseFloat(groups.sl) || 0,
       takeProfits: takeProfits.filter((tp) => !isNaN(tp)),
       timestamp,

@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Database, Upload, Check, AlertCircle, Settings2 } from "lucide-react";
+import { Database, Upload, Check, AlertCircle, Settings2, Wand2, Sparkles } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +8,157 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
 import { useBacktestStore } from "@/lib/backtest-store";
 import { apiRequest } from "@/lib/queryClient";
+
+interface DetectionResult {
+  delimiter: string;
+  hasHeader: boolean;
+  dateColumn: number;
+  timeColumn: number;
+  bidColumn: number;
+  askColumn: number;
+  dateFormat: string;
+  timeFormat: string;
+  confidence: number;
+}
+
+function detectTickFormat(sample: string): DetectionResult | null {
+  const lines = sample.trim().split(/\r?\n/).filter(line => line.trim());
+  if (lines.length < 2) return null;
+
+  const delimiters = ["\t", ";", ","];
+  let bestDelimiter = "\t";
+  let maxScore = 0;
+
+  for (const del of delimiters) {
+    const colCounts = lines.map(line => line.split(del).length);
+    const consistent = colCounts.every(c => c === colCounts[0]);
+    const score = consistent ? colCounts[0] * 2 : colCounts[0];
+    if (score > maxScore && colCounts[0] > 1) {
+      maxScore = score;
+      bestDelimiter = del;
+    }
+  }
+
+  const rows = lines.map(line => line.split(bestDelimiter).map(c => c.trim()));
+  const firstRow = rows[0];
+
+  const hasHeader = firstRow.some(col => {
+    const cleaned = col.replace(/[<>]/g, '').toLowerCase();
+    return ['date', 'time', 'bid', 'ask', 'volume', 'last', 'flags'].includes(cleaned);
+  });
+
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  if (dataRows.length === 0) return null;
+  
+  const dataRow = dataRows[0];
+  const headerRow = hasHeader ? firstRow.map(c => c.replace(/[<>]/g, '').toLowerCase()) : [];
+
+  let dateCol = 0, timeCol = 1, bidCol = 2, askCol = 3;
+  let dateFormat = "YYYY-MM-DD";
+  let timeFormat = "HH:mm:ss";
+
+  const datePatterns = [
+    { regex: /^\d{4}\.\d{2}\.\d{2}$/, format: "YYYY.MM.DD" },
+    { regex: /^\d{4}-\d{2}-\d{2}$/, format: "YYYY-MM-DD" },
+    { regex: /^\d{2}\/\d{2}\/\d{4}$/, format: "DD/MM/YYYY" },
+    { regex: /^\d{2}-\d{2}-\d{4}$/, format: "DD-MM-YYYY" },
+  ];
+
+  const timePatterns = [
+    { regex: /^\d{2}:\d{2}:\d{2}\.\d{3}$/, format: "HH:mm:ss.SSS" },
+    { regex: /^\d{2}:\d{2}:\d{2}$/, format: "HH:mm:ss" },
+    { regex: /^\d{2}:\d{2}$/, format: "HH:mm" },
+  ];
+
+  for (let i = 0; i < dataRow.length; i++) {
+    const col = dataRow[i];
+    const header = headerRow[i] || "";
+    
+    if (header === "date" || datePatterns.some(p => p.regex.test(col))) {
+      dateCol = i;
+      const match = datePatterns.find(p => p.regex.test(col));
+      if (match) dateFormat = match.format;
+    }
+
+    if (header === "time" || timePatterns.some(p => p.regex.test(col))) {
+      timeCol = i;
+      const match = timePatterns.find(p => p.regex.test(col));
+      if (match) timeFormat = match.format;
+    }
+  }
+
+  if (hasHeader) {
+    const bidIdx = headerRow.findIndex(h => h === "bid");
+    const askIdx = headerRow.findIndex(h => h === "ask");
+    if (bidIdx !== -1) bidCol = bidIdx;
+    if (askIdx !== -1) askCol = askIdx;
+  } else {
+    const numericCols: { col: number; values: number[] }[] = [];
+    
+    for (let i = 0; i < dataRow.length; i++) {
+      if (i === dateCol || i === timeCol) continue;
+      
+      const values = dataRows.slice(0, 5).map(row => parseFloat(row[i] || ""));
+      if (values.every(v => !isNaN(v) && v > 0)) {
+        numericCols.push({ col: i, values });
+      }
+    }
+
+    const pricePairs: { col1: number; col2: number; score: number }[] = [];
+    for (let i = 0; i < numericCols.length; i++) {
+      for (let j = i + 1; j < numericCols.length; j++) {
+        const spreads = numericCols[i].values.map((v, idx) => 
+          numericCols[j].values[idx] - v
+        );
+        
+        const allPositive = spreads.every(s => s > 0);
+        const allNegative = spreads.every(s => s < 0);
+        const consistent = allPositive || allNegative;
+        
+        if (!consistent) continue;
+        
+        const avgSpread = spreads.reduce((a, b) => a + Math.abs(b), 0) / spreads.length;
+        const avgValue = numericCols[i].values.reduce((a, b) => a + b, 0) / numericCols[i].values.length;
+        const spreadRatio = avgSpread / avgValue;
+        
+        if (spreadRatio > 0.00001 && spreadRatio < 0.005) {
+          pricePairs.push({
+            col1: numericCols[i].col,
+            col2: numericCols[j].col,
+            score: spreadRatio,
+          });
+        }
+      }
+    }
+
+    if (pricePairs.length > 0) {
+      pricePairs.sort((a, b) => a.score - b.score);
+      const bestPair = pricePairs[0];
+      const val1 = parseFloat(dataRow[bestPair.col1]);
+      const val2 = parseFloat(dataRow[bestPair.col2]);
+      bidCol = val1 < val2 ? bestPair.col1 : bestPair.col2;
+      askCol = val1 < val2 ? bestPair.col2 : bestPair.col1;
+    } else if (numericCols.length >= 2) {
+      bidCol = numericCols[0].col;
+      askCol = numericCols[1].col;
+    }
+  }
+
+  return {
+    delimiter: bestDelimiter,
+    hasHeader,
+    dateColumn: dateCol,
+    timeColumn: timeCol,
+    bidColumn: bidCol,
+    askColumn: askCol,
+    dateFormat,
+    timeFormat,
+    confidence: hasHeader ? 0.95 : 0.75,
+  };
+}
 
 export default function TickData() {
   const {
@@ -28,6 +177,9 @@ export default function TickData() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  
+  const [sampleText, setSampleText] = useState("");
+  const [detectionStatus, setDetectionStatus] = useState<"idle" | "success" | "error">("idle");
   
   const [delimiter, setDelimiter] = useState(tickFormat?.delimiter || ",");
   const [dateCol, setDateCol] = useState(tickFormat?.dateColumn?.toString() || "0");
@@ -85,6 +237,28 @@ export default function TickData() {
     }
   };
 
+  const handleDetectFormat = () => {
+    const result = detectTickFormat(sampleText);
+    if (result) {
+      setDelimiter(result.delimiter);
+      setDateCol(result.dateColumn.toString());
+      setTimeCol(result.timeColumn.toString());
+      setBidCol(result.bidColumn.toString());
+      setAskCol(result.askColumn.toString());
+      setDateFormat(result.dateFormat);
+      setTimeFormat(result.timeFormat);
+      setHasHeader(result.hasHeader);
+      setDetectionStatus("success");
+      
+      const sampleLines = sampleText.trim().split(/\r?\n/).filter(line => line.trim());
+      if (sampleLines.length > 0) {
+        setTickSampleRows(sampleLines.slice(0, 10));
+      }
+    } else {
+      setDetectionStatus("error");
+    }
+  };
+
   const applyFormat = () => {
     setTickFormat({
       dateColumn: parseInt(dateCol),
@@ -118,6 +292,55 @@ export default function TickData() {
           Upload your historical tick data file for accurate backtesting
         </p>
       </div>
+
+      <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wand2 className="h-5 w-5" />
+            Auto-Detect Format
+          </CardTitle>
+          <CardDescription>
+            Paste a few lines from your tick data file and we'll automatically detect the format
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Textarea
+            placeholder="Paste 3-5 lines from your CSV file here...&#10;&#10;Example:&#10;<DATE><TIME><BID><ASK><LAST><VOLUME><FLAGS>&#10;2025.10.14    16:36:17.568    4110.17 4110.256        ..."
+            value={sampleText}
+            onChange={(e) => {
+              setSampleText(e.target.value);
+              setDetectionStatus("idle");
+            }}
+            className="min-h-32 font-mono text-sm"
+            data-testid="textarea-sample"
+          />
+          
+          <div className="flex items-center gap-4">
+            <Button
+              onClick={handleDetectFormat}
+              disabled={sampleText.trim().length < 20}
+              data-testid="button-detect-format"
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              Detect Format
+            </Button>
+            
+            {detectionStatus === "success" && (
+              <div className="flex items-center gap-2 text-green-600 dark:text-green-400" data-testid="text-detection-success">
+                <Check className="h-4 w-4" />
+                <span>Format detected! Check settings below.</span>
+              </div>
+            )}
+            
+            {detectionStatus === "error" && (
+              <div className="flex items-center gap-2 text-destructive" data-testid="text-detection-error">
+                <AlertCircle className="h-4 w-4" />
+                <span>Could not detect format. Please configure manually.</span>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>

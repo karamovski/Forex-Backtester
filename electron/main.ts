@@ -42,7 +42,7 @@ function createWindow() {
     mainWindow.loadURL("http://localhost:5000");
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+    mainWindow.loadFile(path.join(__dirname, "../dist/public/index.html"));
   }
 
   mainWindow.on("closed", () => {

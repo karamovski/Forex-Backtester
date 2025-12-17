@@ -178,14 +178,34 @@ export default function Signals() {
   };
 
   const parseSignals = () => {
-    if (!signalFormat || !signalsContent) {
+    if (!localPattern || !signalsContent) {
       setParseError("Please set a format pattern and provide signals content");
       return;
     }
 
+    // Build the format fresh from the current pattern (don't rely on stale store state)
+    const hasTp = localPattern.includes("{tp}") && !localPattern.includes("{tp1}");
+    const hasSymbol = localPattern.includes("{symbol}");
+    const hasEntry = localPattern.includes("{entry}");
+    const currentFormat: SignalFormat = {
+      pattern: localPattern,
+      symbolPlaceholder: hasSymbol ? "{symbol}" : "",
+      directionPlaceholder: "{direction}",
+      entryPlaceholder: hasEntry ? "{entry}" : "",
+      slPlaceholder: "{sl}",
+      tp1Placeholder: hasTp ? "{tp}" : "{tp1}",
+      tp2Placeholder: localPattern.includes("{tp2}") ? "{tp2}" : undefined,
+      tp3Placeholder: localPattern.includes("{tp3}") ? "{tp3}" : undefined,
+      tp4Placeholder: localPattern.includes("{tp4}") ? "{tp4}" : undefined,
+    };
+
+    // Update the store
+    setSignalFormat(currentFormat);
+    setSignalFormatPattern(localPattern);
+
     // Debug: Log the format being used
-    console.log("Parsing with format:", JSON.stringify(signalFormat, null, 2));
-    console.log("Entry placeholder is:", signalFormat.entryPlaceholder ? `"${signalFormat.entryPlaceholder}"` : "empty (market entry)");
+    console.log("Parsing with format:", JSON.stringify(currentFormat, null, 2));
+    console.log("Entry placeholder is:", currentFormat.entryPlaceholder ? `"${currentFormat.entryPlaceholder}"` : "empty (market entry)");
 
     setParseError(null);
     const lines = signalsContent.split("\n").filter((l) => l.trim());
@@ -193,7 +213,7 @@ export default function Signals() {
     const errors: string[] = [];
 
     for (const line of lines) {
-      const signal = parseSignalFromPattern(line.trim(), signalFormat);
+      const signal = parseSignalFromPattern(line.trim(), currentFormat);
       if (signal) {
         // Debug: Log first parsed signal
         if (parsed.length === 0) {

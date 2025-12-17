@@ -229,19 +229,25 @@ export default function TickData() {
 
       xhr.onload = () => {
         if (xhr.status === 200) {
-          const response = JSON.parse(xhr.responseText);
-          setTickDataId(response.id);
-          setTickSampleRows(response.sampleRows);
-          setTickDataLoaded(true, response.rowCount);
-          setUploadProgress(100);
+          try {
+            const response = JSON.parse(xhr.responseText);
+            setTickDataId(response.id);
+            setTickSampleRows(response.sampleRows);
+            setTickDataLoaded(true, response.rowCount);
+            setUploadProgress(100);
+          } catch (e) {
+            setUploadError("Failed to process server response");
+          }
         } else {
-          setUploadError("Upload failed: " + xhr.statusText);
+          const errorDetail = xhr.responseText ? `: ${xhr.responseText}` : ` (status ${xhr.status})`;
+          setUploadError("Upload failed" + errorDetail);
         }
         setUploading(false);
       };
 
       xhr.onerror = () => {
-        setUploadError("Upload failed. Check your connection and try again.");
+        // Network error - connection was cut off
+        setUploadError("Connection lost during upload. Large files (100MB+) may exceed server limits. Try splitting the file.");
         setUploading(false);
       };
 

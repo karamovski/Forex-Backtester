@@ -338,6 +338,18 @@ export async function registerRoutes(
         stream.on("error", reject);
       });
       
+      // Check if we got HTML instead of CSV (common with Google Drive)
+      if (sampleRows.length > 0) {
+        const firstRow = sampleRows[0].toLowerCase();
+        if (firstRow.includes("<!doctype") || firstRow.includes("<html") || firstRow.includes("<script")) {
+          fs.unlinkSync(finalPath);
+          chunkUploadStore.delete(uploadId);
+          return res.status(400).json({
+            error: "Received HTML instead of CSV data. The file host may require authentication or confirmation.",
+          });
+        }
+      }
+      
       const id = crypto.randomUUID();
       tickDataStore.add({
         id,
@@ -499,6 +511,17 @@ export async function registerRoutes(
         
         stream.on("error", reject);
       });
+      
+      // Check if we got HTML instead of CSV (common with Google Drive)
+      if (sampleRows.length > 0) {
+        const firstRow = sampleRows[0].toLowerCase();
+        if (firstRow.includes("<!doctype") || firstRow.includes("<html") || firstRow.includes("<script") || firstRow.includes("_drive_")) {
+          fs.unlinkSync(filePath);
+          return res.status(400).json({
+            error: "Received HTML page instead of CSV. Google Drive blocks large file downloads. Use the 'Upload File' tab instead.",
+          });
+        }
+      }
       
       const id = crypto.randomUUID();
       tickDataStore.add({

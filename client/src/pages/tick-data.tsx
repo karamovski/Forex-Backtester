@@ -45,7 +45,14 @@ function detectTickFormat(sample: string): DetectionResult | null {
     }
   }
   
-  const delimiterStr = bestDelimiter instanceof RegExp ? " " : bestDelimiter;
+  let delimiterStr: string;
+  if (bestDelimiter instanceof RegExp) {
+    delimiterStr = "space";
+  } else if (bestDelimiter === "\t") {
+    delimiterStr = "tab";
+  } else {
+    delimiterStr = bestDelimiter;
+  }
 
   const rows = lines.map(line => 
     (bestDelimiter instanceof RegExp ? line.split(bestDelimiter) : line.split(bestDelimiter))
@@ -281,8 +288,15 @@ export default function TickData() {
     });
   };
 
+  const getDelimiterRegex = (del: string): string | RegExp => {
+    if (del === "tab") return "\t";
+    if (del === "space") return /\s+/;
+    return del;
+  };
+
   const parseSampleRow = (row: string) => {
-    const cols = row.split(delimiter);
+    const del = getDelimiterRegex(delimiter);
+    const cols = row.split(del).map(c => c.trim()).filter(c => c.length > 0);
     return {
       date: cols[parseInt(dateCol)] || "-",
       time: cols[parseInt(timeCol)] || "-",
@@ -424,13 +438,13 @@ export default function TickData() {
                 <Label htmlFor="delimiter">Delimiter</Label>
                 <Select value={delimiter} onValueChange={setDelimiter}>
                   <SelectTrigger id="delimiter" data-testid="select-delimiter">
-                    <SelectValue />
+                    <SelectValue placeholder="Select delimiter" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value=",">Comma (,)</SelectItem>
                     <SelectItem value=";">Semicolon (;)</SelectItem>
-                    <SelectItem value="\t">Tab</SelectItem>
-                    <SelectItem value=" ">Space</SelectItem>
+                    <SelectItem value="tab">Tab</SelectItem>
+                    <SelectItem value="space">Space</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -217,9 +217,21 @@ export async function runBacktest(
     balance: balance,
   });
 
+  // Log signal time range for debugging
+  const firstSignalTime = parseSignalTimestamp(sortedSignals[0].timestamp!);
+  const lastSignalTime = parseSignalTimestamp(sortedSignals[sortedSignals.length - 1].timestamp!);
   console.log(`Starting backtest with ${sortedSignals.length} signals`);
+  console.log(`Signal time range: ${firstSignalTime.toISOString()} to ${lastSignalTime.toISOString()}`);
+
+  let firstTickTime: Date | null = null;
+  let lastTickTime: Date | null = null;
 
   for await (const tick of streamTicks(tickDataId, tickFormat)) {
+    if (!firstTickTime) {
+      firstTickTime = tick.timestamp;
+      console.log(`First tick: ${firstTickTime.toISOString()}, bid: ${tick.bid}, ask: ${tick.ask}`);
+    }
+    lastTickTime = tick.timestamp;
     tickCount++;
 
     if (tickCount % progressInterval === 0) {
@@ -450,6 +462,28 @@ export async function runBacktest(
   }
 
   console.log(`Backtest complete: ${tickCount.toLocaleString()} ticks processed, ${trades.length} trades`);
+  if (lastTickTime) {
+    console.log(`Tick data range: ${firstTickTime?.toISOString()} to ${lastTickTime.toISOString()}`);
+  }
+  console.log(`Signals matched: ${signalIndex} of ${sortedSignals.length}, open trades at end: ${openTrades.size}`);
+  
+  // Debug: if no trades executed, explain why
+  if (trades.length === 0 && sortedSignals.length > 0) {
+    if (firstTickTime && lastTickTime) {
+      const tickStart = firstTickTime.getTime();
+      const tickEnd = lastTickTime.getTime();
+      const sigStart = firstSignalTime.getTime();
+      const sigEnd = lastSignalTime.getTime();
+      
+      if (sigStart > tickEnd) {
+        console.log(`WARNING: All signals are AFTER tick data. Signals start at ${firstSignalTime.toISOString()} but ticks end at ${lastTickTime.toISOString()}`);
+      } else if (sigEnd < tickStart) {
+        console.log(`WARNING: All signals are BEFORE tick data. Signals end at ${lastSignalTime.toISOString()} but ticks start at ${firstTickTime.toISOString()}`);
+      } else if (openTrades.size > 0) {
+        console.log(`WARNING: ${openTrades.size} trades were opened but never closed (SL/TP not hit within tick data)`);
+      }
+    }
+  }
 
   const endTime = new Date();
   const winningTrades = trades.filter(t => t.profit > 0);

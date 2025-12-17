@@ -28,21 +28,30 @@ function detectTickFormat(sample: string): DetectionResult | null {
   const lines = sample.trim().split(/\r?\n/).filter(line => line.trim());
   if (lines.length < 2) return null;
 
-  const delimiters = ["\t", ";", ","];
-  let bestDelimiter = "\t";
+  const delimiters = ["\t", ";", ",", /\s+/];
+  let bestDelimiter: string | RegExp = "\t";
   let maxScore = 0;
 
   for (const del of delimiters) {
-    const colCounts = lines.map(line => line.split(del).length);
+    const colCounts = lines.map(line => 
+      typeof del === "string" ? line.split(del).length : line.split(del).length
+    );
     const consistent = colCounts.every(c => c === colCounts[0]);
-    const score = consistent ? colCounts[0] * 2 : colCounts[0];
-    if (score > maxScore && colCounts[0] > 1) {
+    const colCount = colCounts[0];
+    const score = consistent && colCount > 3 ? colCount * 3 : (consistent ? colCount * 2 : colCount);
+    if (score > maxScore && colCount > 1) {
       maxScore = score;
       bestDelimiter = del;
     }
   }
+  
+  const delimiterStr = bestDelimiter instanceof RegExp ? " " : bestDelimiter;
 
-  const rows = lines.map(line => line.split(bestDelimiter).map(c => c.trim()));
+  const rows = lines.map(line => 
+    (bestDelimiter instanceof RegExp ? line.split(bestDelimiter) : line.split(bestDelimiter))
+      .map(c => c.trim())
+      .filter(c => c.length > 0)
+  );
   const firstRow = rows[0];
 
   const hasHeader = firstRow.some(col => {
@@ -148,7 +157,7 @@ function detectTickFormat(sample: string): DetectionResult | null {
   }
 
   return {
-    delimiter: bestDelimiter,
+    delimiter: delimiterStr,
     hasHeader,
     dateColumn: dateCol,
     timeColumn: timeCol,

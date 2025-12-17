@@ -6,7 +6,7 @@ import type {
   TradeResult,
   BacktestResults,
 } from "@shared/schema";
-import { storage } from "./storage";
+import { tickDataStore } from "./storage";
 
 interface Tick {
   timestamp: Date;
@@ -155,7 +155,7 @@ function parseSignalTimestamp(timestamp: string): Date {
 }
 
 async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGenerator<Tick> {
-  const dataset = await storage.getTickData(tickDataId);
+  const dataset = tickDataStore.get(tickDataId);
   if (!dataset) {
     throw new Error("Tick data not found. Please upload your tick data file on the Tick Data page.");
   }

@@ -1,11 +1,12 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, tickDataStore } from "./storage";
 import { runBacktest } from "./backtest-engine";
 import { z } from "zod";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import {
   tickFormatSchema,
   signalFormatSchema,
@@ -149,26 +150,27 @@ export async function registerRoutes(
       }
 
       const filePath = req.file.path;
-      const fileName = req.file.originalname || "uploaded.csv";
       
-      // Read entire file content for database storage
+      // Read entire file content
       const content = fs.readFileSync(filePath, "utf-8");
       const lines = content.split("\n").filter(l => l.trim());
       const rowCount = lines.length;
       const sampleRows = lines.slice(0, 10);
 
-      // Store in database
-      const tickDataRecord = await storage.createTickData({
-        filename: fileName,
+      // Store in memory
+      const id = crypto.randomUUID();
+      tickDataStore.add({
+        id,
         content,
         rowCount,
         sampleRows,
+        uploadedAt: new Date(),
       });
 
       // Clean up temp file
       fs.unlinkSync(filePath);
 
-      return res.json({ id: tickDataRecord.id, rowCount, sampleRows });
+      return res.json({ id, rowCount, sampleRows });
     } catch (error) {
       console.error("Upload error:", error);
       return res.status(500).json({
@@ -292,19 +294,21 @@ export async function registerRoutes(
         }
       }
       
-      // Store in database
-      const tickDataRecord = await storage.createTickData({
-        filename: uploadData.fileName,
+      // Store in memory
+      const id = crypto.randomUUID();
+      tickDataStore.add({
+        id,
         content,
         rowCount,
         sampleRows,
+        uploadedAt: new Date(),
       });
       
       // Clean up temp file and upload session
       fs.unlinkSync(finalPath);
       chunkUploadStore.delete(uploadId);
       
-      return res.json({ id: tickDataRecord.id, rowCount, sampleRows });
+      return res.json({ id, rowCount, sampleRows });
     } catch (error) {
       console.error("Finalize upload error:", error);
       return res.status(500).json({ 
@@ -435,21 +439,20 @@ export async function registerRoutes(
         }
       }
       
-      // Extract filename from URL
-      const urlFileName = url.split("/").pop()?.split("?")[0] || "url-download.csv";
-      
-      // Store in database
-      const tickDataRecord = await storage.createTickData({
-        filename: urlFileName,
+      // Store in memory
+      const id = crypto.randomUUID();
+      tickDataStore.add({
+        id,
         content,
         rowCount,
         sampleRows,
+        uploadedAt: new Date(),
       });
       
       // Clean up temp file
       fs.unlinkSync(filePath);
       
-      return res.json({ id: tickDataRecord.id, rowCount, sampleRows });
+      return res.json({ id, rowCount, sampleRows });
     } catch (error) {
       console.error("URL upload error:", error);
       return res.status(500).json({ 

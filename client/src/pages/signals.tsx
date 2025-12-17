@@ -183,6 +183,10 @@ export default function Signals() {
       return;
     }
 
+    // Debug: Log the format being used
+    console.log("Parsing with format:", JSON.stringify(signalFormat, null, 2));
+    console.log("Entry placeholder is:", signalFormat.entryPlaceholder ? `"${signalFormat.entryPlaceholder}"` : "empty (market entry)");
+
     setParseError(null);
     const lines = signalsContent.split("\n").filter((l) => l.trim());
     const parsed: ParsedSignal[] = [];
@@ -191,6 +195,10 @@ export default function Signals() {
     for (const line of lines) {
       const signal = parseSignalFromPattern(line.trim(), signalFormat);
       if (signal) {
+        // Debug: Log first parsed signal
+        if (parsed.length === 0) {
+          console.log("First parsed signal:", JSON.stringify(signal, null, 2));
+        }
         parsed.push(signal);
       } else {
         errors.push(line.substring(0, 50) + (line.length > 50 ? "..." : ""));

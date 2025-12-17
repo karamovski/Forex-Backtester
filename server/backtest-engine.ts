@@ -502,20 +502,30 @@ export async function runBacktest(
   }
   console.log(`Signals matched: ${signalIndex} of ${sortedSignals.length}, open trades at end: ${openTrades.size}`);
   
-  // Debug: if no trades executed, explain why
+  // Debug: if no trades executed, explain why and throw error with details
+  let debugInfo = "";
   if (trades.length === 0 && sortedSignals.length > 0) {
+    if (tickCount === 0) {
+      throw new Error(`No tick data was processed. Make sure your tick data file is loaded and the format is correct.`);
+    }
+    
     if (firstTickTime && lastTickTime) {
       const tickStart = firstTickTime.getTime();
       const tickEnd = lastTickTime.getTime();
       const sigStart = firstSignalTime.getTime();
       const sigEnd = lastSignalTime.getTime();
       
+      debugInfo = `\n\nTick data range: ${firstTickTime.toISOString().substring(0, 19)} to ${lastTickTime.toISOString().substring(0, 19)}` +
+                  `\nSignal range: ${firstSignalTime.toISOString().substring(0, 19)} to ${lastSignalTime.toISOString().substring(0, 19)}`;
+      
       if (sigStart > tickEnd) {
-        console.log(`WARNING: All signals are AFTER tick data. Signals start at ${firstSignalTime.toISOString()} but ticks end at ${lastTickTime.toISOString()}`);
+        throw new Error(`Signal timestamps are AFTER your tick data ends. Your signals start at ${firstSignalTime.toISOString().substring(0, 19)} but tick data ends at ${lastTickTime.toISOString().substring(0, 19)}. Make sure your signal dates match your tick data date range.`);
       } else if (sigEnd < tickStart) {
-        console.log(`WARNING: All signals are BEFORE tick data. Signals end at ${lastSignalTime.toISOString()} but ticks start at ${firstTickTime.toISOString()}`);
+        throw new Error(`Signal timestamps are BEFORE your tick data starts. Your signals end at ${lastSignalTime.toISOString().substring(0, 19)} but tick data starts at ${firstTickTime.toISOString().substring(0, 19)}. Make sure your signal dates match your tick data date range.`);
       } else if (openTrades.size > 0) {
         console.log(`WARNING: ${openTrades.size} trades were opened but never closed (SL/TP not hit within tick data)`);
+      } else {
+        console.log(`WARNING: Signals and tick data overlap but no trades opened. Check timestamp parsing.` + debugInfo);
       }
     }
   }

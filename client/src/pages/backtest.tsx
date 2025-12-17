@@ -8,6 +8,7 @@ import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { isElectron, getElectronAPI } from "@/lib/is-electron";
 import type { BacktestResults } from "@shared/schema";
 
 interface ChecklistItem {
@@ -22,9 +23,11 @@ interface ChecklistItem {
 export default function Backtest() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const electronMode = isElectron();
   const {
     tickDataId,
     tickDataContent,
+    tickFilePaths,
     tickDataLoaded,
     tickRowCount,
     tickFormat,
@@ -80,16 +83,33 @@ export default function Backtest() {
 
   const backtestMutation = useMutation({
     mutationFn: async () => {
-      // Don't send tickDataContent - data is stored on server
-      const response = await apiRequest("POST", "/api/backtest/run", {
-        tickDataId,
-        tickFormat,
-        strategy,
-        risk,
-        gmtOffset,
-        parsedSignals,
-      });
-      return response as unknown as BacktestResults;
+      if (electronMode && tickFilePaths.length > 0) {
+        const api = getElectronAPI();
+        const result = await api.runBacktest({
+          tickFilePaths,
+          tickFormat: tickFormat!,
+          parsedSignals,
+          strategy,
+          risk,
+          gmtOffset,
+        });
+        
+        if (!result.success) {
+          throw new Error(result.error || "Backtest failed");
+        }
+        
+        return result.results as BacktestResults;
+      } else {
+        const response = await apiRequest("POST", "/api/backtest/run", {
+          tickDataId,
+          tickFormat,
+          strategy,
+          risk,
+          gmtOffset,
+          parsedSignals,
+        });
+        return response as unknown as BacktestResults;
+      }
     },
     onMutate: () => {
       setIsRunning(true);

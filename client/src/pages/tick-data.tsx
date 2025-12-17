@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Database, Upload, Check, AlertCircle, Settings2, Wand2, Sparkles, Link, FileUp } from "lucide-react";
+import { Database, Upload, Check, AlertCircle, Settings2, Wand2, Sparkles, Link, FileUp, FolderOpen } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBacktestStore } from "@/lib/backtest-store";
 import { apiRequest } from "@/lib/queryClient";
+import { isElectron, getElectronAPI } from "@/lib/is-electron";
 
 interface DetectionResult {
   delimiter: string;
@@ -180,16 +181,20 @@ function detectTickFormat(sample: string): DetectionResult | null {
 export default function TickData() {
   const {
     tickDataId,
+    tickFilePaths,
     tickDataLoaded,
     tickRowCount,
     tickSampleRows,
     tickFormat,
     setTickDataId,
     setTickDataContent,
+    setTickFilePaths,
     setTickDataLoaded,
     setTickSampleRows,
     setTickFormat,
   } = useBacktestStore();
+  
+  const electronMode = isElectron();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -329,6 +334,57 @@ export default function TickData() {
     }
   };
 
+  const handleElectronFilePick = async () => {
+    if (!electronMode) return;
+    
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadError(null);
+    
+    try {
+      const api = getElectronAPI();
+      const result = await api.openTickFiles();
+      
+      if (result.canceled || result.filePaths.length === 0) {
+        setUploading(false);
+        return;
+      }
+      
+      setUploadProgress(20);
+      
+      let totalRows = 0;
+      const allSampleRows: string[] = [];
+      
+      for (let i = 0; i < result.filePaths.length; i++) {
+        const filePath = result.filePaths[i];
+        const fileData = await api.readTickData(filePath);
+        
+        if (!fileData.success) {
+          throw new Error(fileData.error || "Failed to read file");
+        }
+        
+        totalRows += fileData.estimatedRowCount || 0;
+        if (allSampleRows.length < 10 && fileData.sampleRows) {
+          allSampleRows.push(...fileData.sampleRows.slice(0, 10 - allSampleRows.length));
+        }
+        
+        setUploadProgress(20 + Math.round(((i + 1) / result.filePaths.length) * 70));
+      }
+      
+      setTickFilePaths(result.filePaths);
+      setTickDataId("local-files");
+      setTickDataContent("");
+      setTickSampleRows(allSampleRows);
+      setTickDataLoaded(true, totalRows);
+      setUploadProgress(100);
+      
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Failed to load files");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleDetectFormat = () => {
     const result = detectTickFormat(sampleText);
     if (result) {
@@ -453,68 +509,96 @@ export default function TickData() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Tabs value={uploadMode} onValueChange={(v) => setUploadMode(v as "file" | "url")}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="url" data-testid="tab-upload-url">
-                  <Link className="mr-2 h-4 w-4" />
-                  From URL
-                </TabsTrigger>
-                <TabsTrigger value="file" data-testid="tab-upload-file">
-                  <FileUp className="mr-2 h-4 w-4" />
-                  Upload File
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="url" className="space-y-3 mt-4">
-                <div className="space-y-2">
-                  <Label htmlFor="file-url">Direct Download URL</Label>
-                  <Input
-                    id="file-url"
-                    placeholder="https://example.com/tickdata.csv"
-                    value={fileUrl}
-                    onChange={(e) => setFileUrl(e.target.value)}
-                    disabled={uploading}
-                    data-testid="input-file-url"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Upload to Google Drive, Dropbox, or any file host. Paste the HTTPS direct download link.
-                  </p>
-                </div>
+            {electronMode ? (
+              <div className="space-y-3">
                 <Button
-                  onClick={handleUrlUpload}
-                  disabled={uploading || !fileUrl.trim()}
-                  className="w-full"
-                  data-testid="button-fetch-url"
-                >
-                  <Database className="mr-2 h-4 w-4" />
-                  {uploading ? "Fetching..." : "Fetch Tick Data"}
-                </Button>
-              </TabsContent>
-              
-              <TabsContent value="file" className="space-y-3 mt-4">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv,.txt"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                  data-testid="input-tick-file"
-                />
-                <Button
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={handleElectronFilePick}
                   disabled={uploading}
                   className="w-full"
-                  variant="outline"
-                  data-testid="button-upload-ticks"
+                  size="lg"
+                  data-testid="button-pick-local-files"
                 >
-                  <FileUp className="mr-2 h-4 w-4" />
-                  {uploading ? "Uploading..." : "Select Tick Data File"}
+                  <FolderOpen className="mr-2 h-5 w-5" />
+                  {uploading ? "Loading..." : "Select Tick Data Files"}
                 </Button>
-                <p className="text-xs text-muted-foreground">
-                  For large files (10MB+), uses chunked upload
+                <p className="text-sm text-muted-foreground text-center">
+                  Select one or more CSV files from your computer. Files are read directly - no uploading required.
                 </p>
-              </TabsContent>
-            </Tabs>
+                {tickFilePaths.length > 0 && (
+                  <div className="text-sm text-muted-foreground">
+                    <p className="font-medium mb-1">Selected files:</p>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {tickFilePaths.map((fp, idx) => (
+                        <li key={idx} className="truncate text-xs">{fp.split(/[/\\]/).pop()}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Tabs value={uploadMode} onValueChange={(v) => setUploadMode(v as "file" | "url")}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="url" data-testid="tab-upload-url">
+                    <Link className="mr-2 h-4 w-4" />
+                    From URL
+                  </TabsTrigger>
+                  <TabsTrigger value="file" data-testid="tab-upload-file">
+                    <FileUp className="mr-2 h-4 w-4" />
+                    Upload File
+                  </TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="url" className="space-y-3 mt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="file-url">Direct Download URL</Label>
+                    <Input
+                      id="file-url"
+                      placeholder="https://example.com/tickdata.csv"
+                      value={fileUrl}
+                      onChange={(e) => setFileUrl(e.target.value)}
+                      disabled={uploading}
+                      data-testid="input-file-url"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Upload to Google Drive, Dropbox, or any file host. Paste the HTTPS direct download link.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleUrlUpload}
+                    disabled={uploading || !fileUrl.trim()}
+                    className="w-full"
+                    data-testid="button-fetch-url"
+                  >
+                    <Database className="mr-2 h-4 w-4" />
+                    {uploading ? "Fetching..." : "Fetch Tick Data"}
+                  </Button>
+                </TabsContent>
+                
+                <TabsContent value="file" className="space-y-3 mt-4">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,.txt"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                    data-testid="input-tick-file"
+                  />
+                  <Button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="w-full"
+                    variant="outline"
+                    data-testid="button-upload-ticks"
+                  >
+                    <FileUp className="mr-2 h-4 w-4" />
+                    {uploading ? "Uploading..." : "Select Tick Data File"}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    For large files (10MB+), uses chunked upload
+                  </p>
+                </TabsContent>
+              </Tabs>
+            )}
 
             {uploading && (
               <div className="space-y-2">

@@ -99,7 +99,7 @@ export const tradeResultSchema = z.object({
   entryTime: z.string(),
   exitPrice: z.number(),
   exitTime: z.string(),
-  exitReason: z.enum(["tp1", "tp2", "tp3", "tp4", "sl", "trailing_sl", "manual"]),
+  exitReason: z.enum(["tp1", "tp2", "tp3", "tp4", "sl", "trailing_sl", "manual", "open"]),
   lotSize: z.number(),
   pips: z.number(),
   profit: z.number(),

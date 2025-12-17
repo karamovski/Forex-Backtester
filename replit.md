@@ -39,6 +39,15 @@ Preferred communication style: Simple, everyday language.
 - **Component Structure**: UI primitives in `components/ui/`, application components at `components/` root
 - **Page-based Organization**: Each workflow step has its own page component in `pages/`
 
+### Shared Backtest Core
+Located in `shared/backtest-core.ts`, provides reusable core logic:
+- Tick parsing with configurable column formats
+- Signal timestamp parsing (smart date format detection)
+- Trade simulation with async generator pattern
+- Lot sizing calculations (percentage, fixed, rule-based)
+- Pip value calculations for various currency pairs
+- Used by both web server and Electron desktop app
+
 ### Backtesting Engine
 Located in `server/backtest-engine.ts`, handles:
 - Tick data processing with configurable formats
@@ -69,3 +78,19 @@ Located in `server/backtest-engine.ts`, handles:
 - **Vite**: Development server and production bundler
 - **esbuild**: Server-side bundling for production
 - **tsx**: TypeScript execution for development
+- **Electron**: Desktop application framework for offline use
+
+### Desktop Application (Electron)
+The application can run as a desktop app with Electron for local file processing:
+- **Main Process**: `electron/main.ts` - handles native dialogs, file I/O, and IPC
+- **Preload Script**: `electron/preload.ts` - exposes safe APIs to renderer
+- **Build Script**: `script/build-electron.ts` - compiles Electron files with esbuild
+- **Packaging Config**: `electron-builder.json` - configures app distribution
+
+Desktop mode benefits:
+- Direct local file access (no upload needed)
+- Faster processing for large tick datasets
+- Works completely offline
+- Native file picker dialogs
+
+See `DESKTOP_BUILD.md` for build and packaging instructions.

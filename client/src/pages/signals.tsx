@@ -37,7 +37,6 @@ const EXAMPLE_FORMATS = [
 function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSignal | null {
   try {
     let pattern = format.pattern;
-    const placeholders: Record<string, { start: number; end: number }> = {};
     
     const allPlaceholders = [
       { key: "symbol", ph: format.symbolPlaceholder },
@@ -50,14 +49,27 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
       { key: "tp4", ph: format.tp4Placeholder },
     ].filter((p) => p.ph);
 
+    // Add ignored placeholders for date/time (matched but not captured)
+    const ignoredPlaceholders = ["{date}", "{time}", "{timestamp}"];
+
     let regexPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     
+    // Replace ignored placeholders with non-capturing wildcard
+    for (const ignored of ignoredPlaceholders) {
+      const escapedPh = ignored.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      regexPattern = regexPattern.replace(escapedPh, `[\\w.:-]+`);
+    }
+    
+    // Replace captured placeholders with named groups
     for (const { key, ph } of allPlaceholders) {
       if (ph) {
         const escapedPh = ph.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        regexPattern = regexPattern.replace(escapedPh, `(?<${key}>[\\w.]+)`);
+        regexPattern = regexPattern.replace(escapedPh, `(?<${key}>[\\w.:-]+)`);
       }
     }
+    
+    // Replace single spaces with flexible whitespace matching
+    regexPattern = regexPattern.replace(/\\ /g, "\\s+");
     
     const regex = new RegExp(regexPattern, "i");
     const match = text.match(regex);
@@ -78,9 +90,9 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
     return {
       id: crypto.randomUUID(),
       rawText: text,
-      symbol: groups.symbol?.toUpperCase() || "",
+      symbol: groups.symbol?.toUpperCase() || "SIGNAL",
       direction: direction as "buy" | "sell",
-      entryPrice: parseFloat(groups.entry) || 0,
+      entryPrice: parseFloat(groups.entry) || parseFloat(groups.sl) || 0,
       stopLoss: parseFloat(groups.sl) || 0,
       takeProfits: takeProfits.filter((tp) => !isNaN(tp)),
     };
@@ -117,13 +129,17 @@ export default function Signals() {
   };
 
   const applyFormat = () => {
+    // Support {tp} as alias for {tp1}
+    const hasTp = localPattern.includes("{tp}") && !localPattern.includes("{tp1}");
+    const hasSymbol = localPattern.includes("{symbol}");
+    const hasEntry = localPattern.includes("{entry}");
     const format: SignalFormat = {
       pattern: localPattern,
-      symbolPlaceholder: "{symbol}",
+      symbolPlaceholder: hasSymbol ? "{symbol}" : "",
       directionPlaceholder: "{direction}",
-      entryPlaceholder: "{entry}",
+      entryPlaceholder: hasEntry ? "{entry}" : "",
       slPlaceholder: "{sl}",
-      tp1Placeholder: "{tp1}",
+      tp1Placeholder: hasTp ? "{tp}" : "{tp1}",
       tp2Placeholder: localPattern.includes("{tp2}") ? "{tp2}" : undefined,
       tp3Placeholder: localPattern.includes("{tp3}") ? "{tp3}" : undefined,
       tp4Placeholder: localPattern.includes("{tp4}") ? "{tp4}" : undefined,

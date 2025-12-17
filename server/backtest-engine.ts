@@ -161,9 +161,11 @@ async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGe
   
   // If not in memory, try object storage
   if (!dataset) {
+    console.log(`Tick data ${tickDataId} not in memory, checking object storage...`);
     try {
       const storedData = await objectStorageService.getTickData(tickDataId);
       if (storedData) {
+        console.log(`Found tick data in object storage: ${storedData.rowCount} rows`);
         dataset = {
           id: tickDataId,
           content: storedData.content,
@@ -173,9 +175,11 @@ async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGe
         };
         // Cache in memory for faster subsequent access
         tickDataStore.add(dataset);
+      } else {
+        console.log(`Tick data ${tickDataId} not found in object storage`);
       }
     } catch (err) {
-      console.warn("Object storage lookup failed:", err);
+      console.error("Object storage lookup failed:", err);
     }
   }
   

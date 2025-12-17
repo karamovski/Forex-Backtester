@@ -162,9 +162,11 @@ export async function registerRoutes(
       
       // Store in object storage for persistence
       try {
+        console.log(`Saving tick data ${id} to object storage (${rowCount} rows)...`);
         await objectStorageService.saveTickData(id, content, { rowCount, sampleRows });
+        console.log(`Successfully saved tick data ${id} to object storage`);
       } catch (storageError) {
-        console.warn("Object storage save failed, using memory only:", storageError);
+        console.error("Object storage save failed, using memory only:", storageError);
       }
 
       // Also store in memory for fast access

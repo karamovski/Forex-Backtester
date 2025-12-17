@@ -1,8 +1,13 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, tickDataStore } from "./storage";
 import { runBacktest } from "./backtest-engine";
 import { z } from "zod";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import { createReadStream } from "fs";
+import { parse } from "csv-parse";
 import {
   tickFormatSchema,
   signalFormatSchema,
@@ -11,11 +16,14 @@ import {
   parsedSignalSchema,
 } from "@shared/schema";
 
+const upload = multer({
+  dest: "/tmp/tick-uploads/",
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB max
+});
+
 const runBacktestRequestSchema = z.object({
-  ticksFolder: z.string(),
-  signalsFile: z.string(),
+  tickDataId: z.string(),
   tickFormat: tickFormatSchema,
-  signalFormat: signalFormatSchema.nullable(),
   strategy: strategyConfigSchema,
   risk: riskConfigSchema,
   gmtOffset: z.number(),
@@ -38,7 +46,7 @@ export async function registerRoutes(
         });
       }
       
-      const { ticksFolder, tickFormat, parsedSignals, strategy, risk, gmtOffset } = validation.data;
+      const { tickDataId, tickFormat, parsedSignals, strategy, risk, gmtOffset } = validation.data;
       
       if (parsedSignals.length === 0) {
         return res.status(400).json({
@@ -48,7 +56,7 @@ export async function registerRoutes(
       }
       
       const results = await runBacktest(
-        ticksFolder,
+        tickDataId,
         tickFormat,
         parsedSignals,
         strategy,
@@ -113,6 +121,69 @@ export async function registerRoutes(
     }
   });
   
+  // Upload tick data file
+  app.post("/api/ticks/upload", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const filePath = req.file.path;
+      let rowCount = 0;
+      const sampleRows: string[] = [];
+
+      // Count rows and collect samples
+      await new Promise<void>((resolve, reject) => {
+        const stream = createReadStream(filePath, { encoding: "utf-8" });
+        let buffer = "";
+        
+        stream.on("data", (chunk: string) => {
+          buffer += chunk;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          
+          for (const line of lines) {
+            if (line.trim()) {
+              rowCount++;
+              if (sampleRows.length < 10) {
+                sampleRows.push(line.trim());
+              }
+            }
+          }
+        });
+        
+        stream.on("end", () => {
+          if (buffer.trim()) {
+            rowCount++;
+            if (sampleRows.length < 10) {
+              sampleRows.push(buffer.trim());
+            }
+          }
+          resolve();
+        });
+        
+        stream.on("error", reject);
+      });
+
+      const id = crypto.randomUUID();
+      tickDataStore.add({
+        id,
+        filePath,
+        rowCount,
+        sampleRows,
+        uploadedAt: new Date(),
+      });
+
+      return res.json({ id, rowCount, sampleRows });
+    } catch (error) {
+      console.error("Upload error:", error);
+      return res.status(500).json({
+        error: "Upload failed",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
   // Health check endpoint
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });

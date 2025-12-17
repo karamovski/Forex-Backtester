@@ -15,10 +15,10 @@ import {
 
 const configItems = [
   {
-    title: "Data Setup",
+    title: "Tick Data",
     url: "/",
     icon: Database,
-    description: "Configure tick data source",
+    description: "Upload historical tick data",
   },
   {
     title: "Signals",

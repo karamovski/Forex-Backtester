@@ -23,7 +23,9 @@ export default function Backtest() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const {
-    ticksFolder,
+    tickDataId,
+    tickDataLoaded,
+    tickRowCount,
     tickFormat,
     signalFormat,
     parsedSignals,
@@ -32,7 +34,7 @@ export default function Backtest() {
     gmtOffset,
     isRunning,
     progress,
-    currentFile,
+    progressMessage,
     setIsRunning,
     setProgress,
     setResults,
@@ -41,9 +43,9 @@ export default function Backtest() {
   const checklist: ChecklistItem[] = [
     {
       id: "data",
-      label: "Data Format Configured",
-      description: tickFormat ? "Format settings applied" : "Configure tick data format",
-      isComplete: !!tickFormat,
+      label: "Tick Data Uploaded",
+      description: tickDataLoaded ? `${tickRowCount.toLocaleString()} ticks loaded` : "Upload tick data file",
+      isComplete: tickDataLoaded && !!tickFormat,
       icon: Settings,
       link: "/",
     },
@@ -78,16 +80,14 @@ export default function Backtest() {
   const backtestMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/backtest/run", {
-        ticksFolder,
-        signalsFile: "", // Content is already parsed
+        tickDataId,
         tickFormat,
-        signalFormat,
         strategy,
         risk,
         gmtOffset,
         parsedSignals,
       });
-      return response as BacktestResults;
+      return response as unknown as BacktestResults;
     },
     onMutate: () => {
       setIsRunning(true);
@@ -259,7 +259,7 @@ export default function Backtest() {
                   <div>
                     <p className="font-medium">Running Backtest...</p>
                     <p className="text-sm text-muted-foreground">
-                      {currentFile || "Processing signals..."}
+                      {progressMessage || "Processing signals..."}
                     </p>
                   </div>
                 </div>

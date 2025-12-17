@@ -7,7 +7,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import DataSetup from "@/pages/data-setup";
+import TickData from "@/pages/tick-data";
 import Signals from "@/pages/signals";
 import Strategy from "@/pages/strategy";
 import RiskManagement from "@/pages/risk";
@@ -19,7 +19,7 @@ import NotFound from "@/pages/not-found";
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={DataSetup} />
+      <Route path="/" component={TickData} />
       <Route path="/signals" component={Signals} />
       <Route path="/strategy" component={Strategy} />
       <Route path="/risk" component={RiskManagement} />

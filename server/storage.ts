@@ -36,3 +36,30 @@ export class MemStorage implements IStorage {
 }
 
 export const storage = new MemStorage();
+
+// Tick data store - tracks uploaded tick files
+interface TickDataset {
+  id: string;
+  filePath: string;
+  rowCount: number;
+  sampleRows: string[];
+  uploadedAt: Date;
+}
+
+class TickDataStorage {
+  private datasets: Map<string, TickDataset> = new Map();
+
+  add(dataset: TickDataset): void {
+    this.datasets.set(dataset.id, dataset);
+  }
+
+  get(id: string): TickDataset | undefined {
+    return this.datasets.get(id);
+  }
+
+  delete(id: string): boolean {
+    return this.datasets.delete(id);
+  }
+}
+
+export const tickDataStore = new TickDataStorage();

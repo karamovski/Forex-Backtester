@@ -113,7 +113,9 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
     }
     
     // Entry price is optional - if not provided, backtest engine uses market price at signal time
-    const entryPrice = groups.entry ? parseFloat(groups.entry) : 0;
+    // IMPORTANT: Only use entry if it was explicitly captured, otherwise default to 0 (market entry)
+    const hasEntryInPattern = format.entryPlaceholder && format.entryPlaceholder.length > 0;
+    const entryPrice = hasEntryInPattern && groups.entry ? parseFloat(groups.entry) : 0;
     
     return {
       id: crypto.randomUUID(),

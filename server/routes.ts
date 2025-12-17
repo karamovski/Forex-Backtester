@@ -360,6 +360,165 @@ export async function registerRoutes(
     }
   });
 
+  // URL-based upload - server fetches file from provided URL
+  app.post("/api/ticks/upload/url", async (req, res) => {
+    try {
+      const { url } = req.body;
+      
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ error: "URL is required" });
+      }
+      
+      // Validate URL format and security
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(url);
+        if (parsedUrl.protocol !== "https:") {
+          throw new Error("Only HTTPS URLs are allowed");
+        }
+        
+        // Block internal/private hostnames (SSRF protection)
+        const hostname = parsedUrl.hostname.toLowerCase();
+        const blockedPatterns = [
+          /^localhost$/i,
+          /^127\./,
+          /^10\./,
+          /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+          /^192\.168\./,
+          /^169\.254\./,
+          /^0\./,
+          /\.local$/i,
+          /\.internal$/i,
+          /^metadata\./i,
+          /^169\.254\.169\.254$/,
+        ];
+        
+        if (blockedPatterns.some(pattern => pattern.test(hostname))) {
+          throw new Error("Internal/private URLs are not allowed");
+        }
+      } catch (e) {
+        return res.status(400).json({ 
+          error: e instanceof Error ? e.message : "Invalid URL format" 
+        });
+      }
+      
+      // Fetch the file from the URL
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "ForexBacktester/1.0",
+        },
+        redirect: "follow",
+      });
+      
+      if (!response.ok) {
+        return res.status(400).json({ 
+          error: `Failed to fetch file: ${response.status} ${response.statusText}` 
+        });
+      }
+      
+      const contentLength = response.headers.get("content-length");
+      const MAX_SIZE = 500 * 1024 * 1024; // 500MB limit
+      
+      // Check file size if available
+      if (contentLength && parseInt(contentLength) > MAX_SIZE) {
+        return res.status(400).json({ error: "File too large (max 500MB)" });
+      }
+      
+      // Save to temp file with streaming size limit
+      const filePath = `/tmp/tick-uploads/${crypto.randomUUID()}.csv`;
+      const fileStream = fs.createWriteStream(filePath);
+      
+      // Stream the response body to file with size enforcement
+      const reader = response.body?.getReader();
+      if (!reader) {
+        return res.status(500).json({ error: "Failed to read response" });
+      }
+      
+      let totalBytes = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          totalBytes += value.length;
+          if (totalBytes > MAX_SIZE) {
+            reader.cancel();
+            fileStream.close();
+            fs.unlinkSync(filePath);
+            return res.status(400).json({ error: "File too large (max 500MB)" });
+          }
+          
+          fileStream.write(Buffer.from(value));
+        }
+      } catch (streamError) {
+        fileStream.close();
+        try { fs.unlinkSync(filePath); } catch {}
+        throw streamError;
+      }
+      
+      fileStream.end();
+      
+      // Wait for file write to complete
+      await new Promise<void>((resolve, reject) => {
+        fileStream.on("finish", resolve);
+        fileStream.on("error", reject);
+      });
+      
+      // Process the file (count rows, get samples)
+      let rowCount = 0;
+      const sampleRows: string[] = [];
+      
+      await new Promise<void>((resolve, reject) => {
+        const stream = createReadStream(filePath, { encoding: "utf-8" });
+        let buffer = "";
+        
+        stream.on("data", (chunk: string) => {
+          buffer += chunk;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          
+          for (const line of lines) {
+            if (line.trim()) {
+              rowCount++;
+              if (sampleRows.length < 10) {
+                sampleRows.push(line.trim());
+              }
+            }
+          }
+        });
+        
+        stream.on("end", () => {
+          if (buffer.trim()) {
+            rowCount++;
+            if (sampleRows.length < 10) {
+              sampleRows.push(buffer.trim());
+            }
+          }
+          resolve();
+        });
+        
+        stream.on("error", reject);
+      });
+      
+      const id = crypto.randomUUID();
+      tickDataStore.add({
+        id,
+        filePath,
+        rowCount,
+        sampleRows,
+        uploadedAt: new Date(),
+      });
+      
+      return res.json({ id, rowCount, sampleRows });
+    } catch (error) {
+      console.error("URL upload error:", error);
+      return res.status(500).json({ 
+        error: "Failed to fetch file from URL",
+        message: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
   // Health check endpoint
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });

@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Database, Upload, Check, AlertCircle, Settings2, Wand2, Sparkles } from "lucide-react";
+import { Database, Upload, Check, AlertCircle, Settings2, Wand2, Sparkles, Link, FileUp } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useBacktestStore } from "@/lib/backtest-store";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -193,6 +194,8 @@ export default function TickData() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadMode, setUploadMode] = useState<"file" | "url">("url");
+  const [fileUrl, setFileUrl] = useState("");
   
   const [sampleText, setSampleText] = useState("");
   const [detectionStatus, setDetectionStatus] = useState<"idle" | "success" | "error">("idle");
@@ -282,6 +285,42 @@ export default function TickData() {
       setUploading(false);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Failed to upload file");
+      setUploading(false);
+    }
+  };
+
+  const handleUrlUpload = async () => {
+    if (!fileUrl.trim()) return;
+
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadError(null);
+
+    try {
+      setUploadProgress(10); // Show some initial progress
+      
+      const response = await fetch("/api/ticks/upload/url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: fileUrl.trim() }),
+      });
+      
+      setUploadProgress(90);
+      
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || `Failed: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      setTickDataId(data.id);
+      setTickSampleRows(data.sampleRows);
+      setTickDataLoaded(true, data.rowCount);
+      setUploadProgress(100);
+      setFileUrl("");
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Failed to fetch file from URL");
+    } finally {
       setUploading(false);
     }
   };
@@ -410,39 +449,82 @@ export default function TickData() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,.txt"
-              onChange={handleFileSelect}
-              className="hidden"
-              data-testid="input-tick-file"
-            />
-            
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="w-full"
-              variant="outline"
-              data-testid="button-upload-ticks"
-            >
-              <Database className="mr-2 h-4 w-4" />
-              {uploading ? "Uploading..." : "Select Tick Data File"}
-            </Button>
+            <Tabs value={uploadMode} onValueChange={(v) => setUploadMode(v as "file" | "url")}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="url" data-testid="tab-upload-url">
+                  <Link className="mr-2 h-4 w-4" />
+                  From URL
+                </TabsTrigger>
+                <TabsTrigger value="file" data-testid="tab-upload-file">
+                  <FileUp className="mr-2 h-4 w-4" />
+                  Upload File
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="url" className="space-y-3 mt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="file-url">Direct Download URL</Label>
+                  <Input
+                    id="file-url"
+                    placeholder="https://example.com/tickdata.csv"
+                    value={fileUrl}
+                    onChange={(e) => setFileUrl(e.target.value)}
+                    disabled={uploading}
+                    data-testid="input-file-url"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Upload to Google Drive, Dropbox, or any file host. Paste the HTTPS direct download link.
+                  </p>
+                </div>
+                <Button
+                  onClick={handleUrlUpload}
+                  disabled={uploading || !fileUrl.trim()}
+                  className="w-full"
+                  data-testid="button-fetch-url"
+                >
+                  <Database className="mr-2 h-4 w-4" />
+                  {uploading ? "Fetching..." : "Fetch Tick Data"}
+                </Button>
+              </TabsContent>
+              
+              <TabsContent value="file" className="space-y-3 mt-4">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,.txt"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  data-testid="input-tick-file"
+                />
+                <Button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="w-full"
+                  variant="outline"
+                  data-testid="button-upload-ticks"
+                >
+                  <FileUp className="mr-2 h-4 w-4" />
+                  {uploading ? "Uploading..." : "Select Tick Data File"}
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  For large files (10MB+), uses chunked upload
+                </p>
+              </TabsContent>
+            </Tabs>
 
             {uploading && (
               <div className="space-y-2">
                 <Progress value={uploadProgress} data-testid="progress-upload" />
                 <p className="text-sm text-muted-foreground text-center">
-                  {uploadProgress}% uploaded
+                  {uploadProgress}% {uploadMode === "url" ? "fetching" : "uploaded"}
                 </p>
               </div>
             )}
 
             {uploadError && (
               <div className="flex items-center gap-2 text-destructive text-sm" data-testid="text-upload-error">
-                <AlertCircle className="h-4 w-4" />
-                {uploadError}
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                <span className="break-all">{uploadError}</span>
               </div>
             )}
 

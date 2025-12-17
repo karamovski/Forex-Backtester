@@ -34,6 +34,12 @@ import {
   Area,
   Scatter,
   ComposedChart,
+  BarChart,
+  Bar,
+  Cell,
+  PieChart,
+  Pie,
+  Legend,
 } from "recharts";
 
 function formatCurrency(value: number): string {
@@ -236,7 +242,7 @@ function calculateCorrelation(arr1: number[], arr2: number[]): number {
 }
 
 function getSymbolCorrelations(trades: TradeResult[]) {
-  const symbols = [...new Set(trades.map(t => t.symbol))];
+  const symbols = Array.from(new Set(trades.map(t => t.symbol)));
   if (symbols.length < 2) return [];
   
   const symbolProfits: Record<string, number[]> = {};
@@ -512,9 +518,9 @@ export default function Results() {
                   <Scatter
                     dataKey="equity"
                     data={chartData.filter(p => p.tradeResult)}
-                    shape={(props: { cx?: number; cy?: number; payload?: { tradeResult?: string } }) => {
-                      const { cx, cy, payload } = props;
-                      if (cx === undefined || cy === undefined) return null;
+                    shape={(props: unknown) => {
+                      const { cx, cy, payload } = props as { cx?: number; cy?: number; payload?: { tradeResult?: string } };
+                      if (cx === undefined || cy === undefined) return <circle />;
                       const isWin = payload?.tradeResult === "win";
                       return (
                         <circle
@@ -700,6 +706,191 @@ export default function Results() {
         }
         return null;
       })()}
+
+      {/* Additional Charts Section */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Drawdown Chart */}
+        <Card>
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg">Drawdown Over Time</CardTitle>
+            <CardDescription>Running drawdown from peak equity</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[250px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart
+                  data={(() => {
+                    let peak = results.initialBalance;
+                    return results.equityCurve.map((point) => {
+                      if (point.equity > peak) peak = point.equity;
+                      const drawdown = peak > 0 ? ((peak - point.equity) / peak) * 100 : 0;
+                      return {
+                        time: new Date(point.time).toLocaleDateString(),
+                        drawdown: -drawdown,
+                      };
+                    });
+                  })()}
+                >
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis
+                    dataKey="time"
+                    className="text-xs"
+                    tick={{ fill: "hsl(var(--muted-foreground))" }}
+                  />
+                  <YAxis
+                    className="text-xs"
+                    tick={{ fill: "hsl(var(--muted-foreground))" }}
+                    tickFormatter={(value) => `${value.toFixed(0)}%`}
+                    domain={["dataMin", 0]}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "6px",
+                    }}
+                    formatter={(value: number) => [`${value.toFixed(2)}%`, "Drawdown"]}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="drawdown"
+                    stroke="hsl(0 84% 60%)"
+                    fill="hsl(0 84% 60% / 0.2)"
+                    strokeWidth={2}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Exit Reason Distribution */}
+        <Card>
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg">Exit Reason Distribution</CardTitle>
+            <CardDescription>How trades were closed</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[250px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={(() => {
+                      const counts: Record<string, number> = {};
+                      results.trades.forEach((t) => {
+                        const reason = t.exitReason.toUpperCase();
+                        counts[reason] = (counts[reason] || 0) + 1;
+                      });
+                      return Object.entries(counts).map(([name, value]) => ({ name, value }));
+                    })()}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={80}
+                    paddingAngle={2}
+                    dataKey="value"
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  >
+                    {(() => {
+                      const counts: Record<string, number> = {};
+                      results.trades.forEach((t) => {
+                        const reason = t.exitReason.toUpperCase();
+                        counts[reason] = (counts[reason] || 0) + 1;
+                      });
+                      const colors: Record<string, string> = {
+                        SL: "hsl(0 84% 60%)",
+                        TP1: "hsl(142 76% 36%)",
+                        TP2: "hsl(142 76% 46%)",
+                        TP3: "hsl(142 76% 56%)",
+                        TP4: "hsl(142 76% 66%)",
+                        TRAILING_SL: "hsl(45 93% 47%)",
+                        OPEN: "hsl(220 14% 50%)",
+                        MANUAL: "hsl(280 65% 60%)",
+                      };
+                      return Object.keys(counts).map((key, index) => (
+                        <Cell key={`cell-${index}`} fill={colors[key] || `hsl(${index * 40} 70% 50%)`} />
+                      ));
+                    })()}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "6px",
+                    }}
+                    formatter={(value: number) => [value, "Trades"]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Monthly Returns */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg">Monthly Returns</CardTitle>
+            <CardDescription>Profit/loss aggregated by month</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[250px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={(() => {
+                    const monthly: Record<string, number> = {};
+                    results.trades.forEach((t) => {
+                      const date = new Date(t.exitTime);
+                      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+                      monthly[key] = (monthly[key] || 0) + t.profit;
+                    });
+                    return Object.entries(monthly)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([month, profit]) => ({ month, profit }));
+                  })()}
+                >
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis
+                    dataKey="month"
+                    className="text-xs"
+                    tick={{ fill: "hsl(var(--muted-foreground))" }}
+                  />
+                  <YAxis
+                    className="text-xs"
+                    tick={{ fill: "hsl(var(--muted-foreground))" }}
+                    tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "hsl(var(--card))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: "6px",
+                    }}
+                    formatter={(value: number) => [formatCurrency(value), "Profit/Loss"]}
+                  />
+                  <Bar dataKey="profit">
+                    {(() => {
+                      const monthly: Record<string, number> = {};
+                      results.trades.forEach((t) => {
+                        const date = new Date(t.exitTime);
+                        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+                        monthly[key] = (monthly[key] || 0) + t.profit;
+                      });
+                      return Object.entries(monthly)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([, profit], index) => (
+                          <Cell
+                            key={`cell-${index}`}
+                            fill={profit >= 0 ? "hsl(142 76% 36%)" : "hsl(0 84% 60%)"}
+                          />
+                        ));
+                    })()}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <Card>
         <CardHeader className="pb-4">

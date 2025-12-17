@@ -13,6 +13,8 @@ import Strategy from "@/pages/strategy";
 import RiskManagement from "@/pages/risk";
 import Backtest from "@/pages/backtest";
 import Results from "@/pages/results";
+import Compare from "@/pages/compare";
+import Configs from "@/pages/configs";
 import Optimize from "@/pages/optimize";
 import NotFound from "@/pages/not-found";
 
@@ -25,6 +27,8 @@ function Router() {
       <Route path="/risk" component={RiskManagement} />
       <Route path="/backtest" component={Backtest} />
       <Route path="/results" component={Results} />
+      <Route path="/compare" component={Compare} />
+      <Route path="/configs" component={Configs} />
       <Route path="/optimize" component={Optimize} />
       <Route component={NotFound} />
     </Switch>

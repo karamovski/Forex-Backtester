@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useBacktestStore } from "@/lib/backtest-store";
+import { addToHistory } from "@/lib/backtest-history";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -119,6 +120,7 @@ export default function Backtest() {
       setIsRunning(false);
       setProgress(100);
       setResults(data);
+      addToHistory(data, strategy, risk);
       setLocation("/results");
     },
     onError: (error: Error) => {

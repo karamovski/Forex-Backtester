@@ -1,4 +1,4 @@
-import { Database, FileText, Settings2, TrendingUp, DollarSign, Play, BarChart3, Sliders } from "lucide-react";
+import { Database, FileText, Settings2, TrendingUp, DollarSign, Play, BarChart3, Sliders, GitCompare, Save } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
   Sidebar,
@@ -52,6 +52,18 @@ const actionItems = [
     url: "/results",
     icon: BarChart3,
     description: "View performance",
+  },
+  {
+    title: "Compare",
+    url: "/compare",
+    icon: GitCompare,
+    description: "Compare backtests",
+  },
+  {
+    title: "Saved Configs",
+    url: "/configs",
+    icon: Save,
+    description: "Save/load settings",
   },
   {
     title: "Optimize",

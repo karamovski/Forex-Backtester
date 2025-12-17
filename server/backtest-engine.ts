@@ -158,7 +158,13 @@ function parseSignalTimestamp(timestamp: string): Date {
 async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGenerator<Tick> {
   const dataset = tickDataStore.get(tickDataId);
   if (!dataset) {
-    throw new Error("Tick data not found");
+    throw new Error("Tick data not found. Please re-upload your tick data file on the Tick Data page.");
+  }
+
+  // Check if file still exists (may be deleted after server restart/redeploy)
+  const fs = await import("fs");
+  if (!fs.existsSync(dataset.filePath)) {
+    throw new Error("Tick data file no longer exists. After publishing, you need to re-upload your tick data file on the Tick Data page.");
   }
 
   const stream = createReadStream(dataset.filePath, { encoding: "utf-8" });

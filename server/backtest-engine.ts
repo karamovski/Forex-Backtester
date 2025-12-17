@@ -110,10 +110,45 @@ function parseSignalTimestamp(timestamp: string): Date {
   const dateParts = datePart.split(/[-./]/);
   const timeParts = timePart.split(/[:.]/).map(p => parseInt(p) || 0);
   
+  let year: number, month: number, day: number;
+  
+  // Smart format detection based on values
+  const p0 = parseInt(dateParts[0]) || 0;
+  const p1 = parseInt(dateParts[1]) || 0;
+  const p2 = parseInt(dateParts[2]) || 0;
+  
+  if (p0 > 31) {
+    // First part is year (YYYY-MM-DD or YYYY.MM.DD)
+    year = p0;
+    month = p1;
+    day = p2;
+  } else if (p2 > 31) {
+    // Last part is year - need to determine if DD/MM or MM/DD
+    year = p2;
+    if (p0 > 12) {
+      // First is day (DD/MM/YYYY)
+      day = p0;
+      month = p1;
+    } else if (p1 > 12) {
+      // Second is day (MM/DD/YYYY)
+      month = p0;
+      day = p1;
+    } else {
+      // Ambiguous - assume DD/MM/YYYY (more common in forex)
+      day = p0;
+      month = p1;
+    }
+  } else {
+    // Default: assume YYYY-MM-DD
+    year = p0 < 100 ? 2000 + p0 : p0;
+    month = p1;
+    day = p2;
+  }
+  
   return new Date(
-    parseInt(dateParts[0]) || 2024,
-    (parseInt(dateParts[1]) || 1) - 1,
-    parseInt(dateParts[2]) || 1,
+    year || 2024,
+    (month || 1) - 1,
+    day || 1,
     timeParts[0] || 0,
     timeParts[1] || 0,
     timeParts[2] || 0

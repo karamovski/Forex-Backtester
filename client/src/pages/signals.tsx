@@ -62,11 +62,11 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
     // Escape special regex chars
     regexPattern = regexPattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     
-    // Replace time placeholders with capturing groups
+    // Replace time placeholders with capturing groups (allow slashes, dashes, dots, colons, spaces)
     for (const { key, ph } of timePlaceholders) {
       const escapedPh = ph.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       if (pattern.includes(ph)) {
-        regexPattern = regexPattern.replace(escapedPh, `(?<${key}>[\\w.:-]+)`);
+        regexPattern = regexPattern.replace(escapedPh, `(?<${key}>[\\w.:/\\-]+)`);
       }
     }
     

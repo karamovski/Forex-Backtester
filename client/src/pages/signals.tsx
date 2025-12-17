@@ -49,8 +49,12 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
       { key: "tp4", ph: format.tp4Placeholder },
     ].filter((p) => p.ph);
 
-    // Add ignored placeholders for date/time (matched but not captured)
-    const ignoredPlaceholders = ["{date}", "{time}", "{timestamp}"];
+    // Date/time placeholders - captured for timestamp
+    const timePlaceholders = [
+      { key: "date", ph: "{date}" },
+      { key: "time", ph: "{time}" },
+      { key: "timestamp", ph: "{timestamp}" },
+    ];
 
     // First replace spaces with a temporary marker before escaping
     let regexPattern = pattern.replace(/ /g, "<<SPACE>>");
@@ -58,10 +62,12 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
     // Escape special regex chars
     regexPattern = regexPattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     
-    // Replace ignored placeholders with non-capturing wildcard
-    for (const ignored of ignoredPlaceholders) {
-      const escapedPh = ignored.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      regexPattern = regexPattern.replace(escapedPh, `[\\w.:-]+`);
+    // Replace time placeholders with capturing groups
+    for (const { key, ph } of timePlaceholders) {
+      const escapedPh = ph.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (pattern.includes(ph)) {
+        regexPattern = regexPattern.replace(escapedPh, `(?<${key}>[\\w.:-]+)`);
+      }
     }
     
     // Replace captured placeholders with named groups
@@ -91,6 +97,16 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
     if (groups.tp3) takeProfits.push(parseFloat(groups.tp3));
     if (groups.tp4) takeProfits.push(parseFloat(groups.tp4));
     
+    // Build timestamp from date and time if available
+    let timestamp: string | undefined;
+    if (groups.timestamp) {
+      timestamp = groups.timestamp;
+    } else if (groups.date && groups.time) {
+      timestamp = `${groups.date} ${groups.time}`;
+    } else if (groups.date) {
+      timestamp = groups.date;
+    }
+    
     return {
       id: crypto.randomUUID(),
       rawText: text,
@@ -99,6 +115,7 @@ function parseSignalFromPattern(text: string, format: SignalFormat): ParsedSigna
       entryPrice: parseFloat(groups.entry) || parseFloat(groups.sl) || 0,
       stopLoss: parseFloat(groups.sl) || 0,
       takeProfits: takeProfits.filter((tp) => !isNaN(tp)),
+      timestamp,
     };
   } catch {
     return null;

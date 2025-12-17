@@ -9,9 +9,11 @@ import type {
 } from "@shared/schema";
 
 interface BacktestState {
-  // Data setup
-  ticksFolder: string;
-  tickSampleLines: string[];
+  // Tick data setup
+  tickDataId: string | null;
+  tickDataLoaded: boolean;
+  tickRowCount: number;
+  tickSampleRows: string[];
   tickFormat: TickFormat | null;
   
   // Signal configuration
@@ -32,14 +34,15 @@ interface BacktestState {
   // Backtest state
   isRunning: boolean;
   progress: number;
-  currentFile: string;
+  progressMessage: string;
   
   // Results
   results: BacktestResults | null;
   
   // Actions
-  setTicksFolder: (folder: string) => void;
-  setTickSampleLines: (lines: string[]) => void;
+  setTickDataId: (id: string | null) => void;
+  setTickDataLoaded: (loaded: boolean, rowCount?: number) => void;
+  setTickSampleRows: (rows: string[]) => void;
   setTickFormat: (format: TickFormat | null) => void;
   setSignalsContent: (content: string) => void;
   setSignalFormatPattern: (pattern: string) => void;
@@ -49,7 +52,7 @@ interface BacktestState {
   setRisk: (risk: Partial<RiskConfig>) => void;
   setGmtOffset: (offset: number) => void;
   setIsRunning: (running: boolean) => void;
-  setProgress: (progress: number, currentFile?: string) => void;
+  setProgress: (progress: number, message?: string) => void;
   setResults: (results: BacktestResults | null) => void;
   resetAll: () => void;
 }
@@ -78,8 +81,10 @@ const defaultRisk: RiskConfig = {
 
 export const useBacktestStore = create<BacktestState>((set) => ({
   // Initial state
-  ticksFolder: "",
-  tickSampleLines: [],
+  tickDataId: null,
+  tickDataLoaded: false,
+  tickRowCount: 0,
+  tickSampleRows: [],
   tickFormat: null,
   signalsContent: "",
   signalFormatPattern: "",
@@ -90,12 +95,13 @@ export const useBacktestStore = create<BacktestState>((set) => ({
   gmtOffset: 0,
   isRunning: false,
   progress: 0,
-  currentFile: "",
+  progressMessage: "",
   results: null,
   
   // Actions
-  setTicksFolder: (folder) => set({ ticksFolder: folder }),
-  setTickSampleLines: (lines) => set({ tickSampleLines: lines }),
+  setTickDataId: (id) => set({ tickDataId: id }),
+  setTickDataLoaded: (loaded, rowCount) => set({ tickDataLoaded: loaded, tickRowCount: rowCount ?? 0 }),
+  setTickSampleRows: (rows) => set({ tickSampleRows: rows }),
   setTickFormat: (format) => set({ tickFormat: format }),
   setSignalsContent: (content) => set({ signalsContent: content }),
   setSignalFormatPattern: (pattern) => set({ signalFormatPattern: pattern }),
@@ -107,13 +113,15 @@ export const useBacktestStore = create<BacktestState>((set) => ({
     set((state) => ({ risk: { ...state.risk, ...risk } })),
   setGmtOffset: (offset) => set({ gmtOffset: offset }),
   setIsRunning: (running) => set({ isRunning: running }),
-  setProgress: (progress, currentFile) =>
-    set({ progress, currentFile: currentFile ?? "" }),
+  setProgress: (progress, message) =>
+    set({ progress, progressMessage: message ?? "" }),
   setResults: (results) => set({ results }),
   resetAll: () =>
     set({
-      ticksFolder: "",
-      tickSampleLines: [],
+      tickDataId: null,
+      tickDataLoaded: false,
+      tickRowCount: 0,
+      tickSampleRows: [],
       tickFormat: null,
       signalsContent: "",
       signalFormatPattern: "",
@@ -124,7 +132,7 @@ export const useBacktestStore = create<BacktestState>((set) => ({
       gmtOffset: 0,
       isRunning: false,
       progress: 0,
-      currentFile: "",
+      progressMessage: "",
       results: null,
     }),
 }));

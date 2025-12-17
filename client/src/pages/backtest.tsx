@@ -80,9 +80,9 @@ export default function Backtest() {
 
   const backtestMutation = useMutation({
     mutationFn: async () => {
+      // Don't send tickDataContent - data is stored on server
       const response = await apiRequest("POST", "/api/backtest/run", {
         tickDataId,
-        tickDataContent,
         tickFormat,
         strategy,
         risk,

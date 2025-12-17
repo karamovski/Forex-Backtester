@@ -277,32 +277,17 @@ export default function TickData() {
     setUploadError(null);
 
     try {
-      // Read file content directly in browser
-      const content = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error("Failed to read file"));
-        reader.onprogress = (e) => {
-          if (e.lengthComputable) {
-            setUploadProgress(Math.round((e.loaded / e.total) * 100));
-          }
-        };
-        reader.readAsText(file);
-      });
-
-      const lines = content.split("\n").filter(l => l.trim());
-      const rowCount = lines.length;
-      const sampleRows = lines.slice(0, 10);
-      const id = crypto.randomUUID();
-
-      setTickDataId(id);
-      setTickDataContent(content);
-      setTickSampleRows(sampleRows);
-      setTickDataLoaded(true, rowCount);
+      // Use chunked upload to send file to server
+      const data = await uploadChunked(file);
+      
+      setTickDataId(data.id);
+      setTickDataContent(""); // Clear content - data is on server
+      setTickSampleRows(data.sampleRows);
+      setTickDataLoaded(true, data.rowCount);
       setUploadProgress(100);
       setUploading(false);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Failed to read file");
+      setUploadError(err instanceof Error ? err.message : "Failed to upload file");
       setUploading(false);
     }
   };
@@ -332,7 +317,7 @@ export default function TickData() {
       
       const data = await response.json();
       setTickDataId(data.id);
-      setTickDataContent(data.content);
+      setTickDataContent(""); // Clear content - data is on server
       setTickSampleRows(data.sampleRows);
       setTickDataLoaded(true, data.rowCount);
       setUploadProgress(100);

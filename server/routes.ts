@@ -153,35 +153,46 @@ export async function registerRoutes(
       }
 
       const filePath = req.file.path;
-      
-      // Read entire file content
-      const content = fs.readFileSync(filePath, "utf-8");
-      const lines = content.split("\n").filter(l => l.trim());
-      const rowCount = lines.length;
-      const sampleRows = lines.slice(0, 10);
-
       const id = crypto.randomUUID();
       
-      // Store in object storage for persistence
+      // Keep the file on disk for backtest access
+      const persistentPath = `/tmp/tick-uploads/${id}.csv`;
+      fs.renameSync(filePath, persistentPath);
+      
+      // Stream first N lines for preview without loading entire file
+      const fileHandle = fs.openSync(persistentPath, "r");
+      const buffer = Buffer.alloc(64 * 1024);
+      const bytesRead = fs.readSync(fileHandle, buffer, 0, buffer.length, 0);
+      fs.closeSync(fileHandle);
+      
+      const preview = buffer.slice(0, bytesRead).toString("utf-8");
+      const previewLines = preview.split("\n").filter(l => l.trim());
+      const sampleRows = previewLines.slice(0, 10);
+      
+      const stat = fs.statSync(persistentPath);
+      const avgLineLen = preview.length / Math.max(previewLines.length, 1);
+      const rowCount = Math.ceil(stat.size / Math.max(avgLineLen, 50));
+      
+      console.log(`Tick data ${id} saved to disk: ${persistentPath} (~${rowCount} rows)`);
+      
+      // Store in object storage for persistence across deployments
       try {
-        console.log(`Saving tick data ${id} to object storage (${rowCount} rows)...`);
+        const content = fs.readFileSync(persistentPath, "utf-8");
         await objectStorageService.saveTickData(id, content, { rowCount, sampleRows });
-        console.log(`Successfully saved tick data ${id} to object storage`);
+        console.log(`Tick data ${id} saved to object storage`);
       } catch (storageError) {
-        console.error("Object storage save failed, using memory only:", storageError);
+        console.warn("Object storage save failed, file remains on disk:", storageError);
       }
 
-      // Also store in memory for fast access
+      // Store in memory with file path only (no content)
       tickDataStore.add({
         id,
-        content,
+        content: "",
+        filePath: persistentPath,
         rowCount,
         sampleRows,
         uploadedAt: new Date(),
       });
-
-      // Clean up temp file
-      fs.unlinkSync(filePath);
 
       return res.json({ id, rowCount, sampleRows });
     } catch (error) {
@@ -289,11 +300,22 @@ export async function registerRoutes(
         writeStream.on("error", reject);
       });
       
-      // Read file content for database storage
-      const content = fs.readFileSync(finalPath, "utf-8");
-      const lines = content.split("\n").filter(l => l.trim());
-      const rowCount = lines.length;
-      const sampleRows = lines.slice(0, 10);
+      // Stream first N lines for preview without loading entire file
+      const fileHandle = fs.openSync(finalPath, "r");
+      const buffer = Buffer.alloc(64 * 1024); // 64KB buffer for first lines
+      const bytesRead = fs.readSync(fileHandle, buffer, 0, buffer.length, 0);
+      fs.closeSync(fileHandle);
+      
+      const preview = buffer.slice(0, bytesRead).toString("utf-8");
+      const previewLines = preview.split("\n").filter(l => l.trim());
+      const sampleRows = previewLines.slice(0, 10);
+      
+      // Count total lines by streaming
+      const stat = fs.statSync(finalPath);
+      const fileSizeBytes = stat.size;
+      // Estimate row count based on avg line length from sample (rough estimate for large files)
+      const avgLineLen = preview.length / Math.max(previewLines.length, 1);
+      const estimatedRowCount = Math.ceil(fileSizeBytes / Math.max(avgLineLen, 50));
       
       // Check if we got HTML instead of CSV (common with Google Drive)
       if (sampleRows.length > 0) {
@@ -309,27 +331,33 @@ export async function registerRoutes(
       
       const id = crypto.randomUUID();
       
-      // Store in object storage for persistence
+      // Keep the combined file on disk for backtest access
+      const persistentPath = `/tmp/tick-uploads/${id}.csv`;
+      fs.renameSync(finalPath, persistentPath);
+      console.log(`Tick data ${id} saved to disk: ${persistentPath} (~${estimatedRowCount} rows, ${(fileSizeBytes / 1024 / 1024).toFixed(2)}MB)`);
+      
+      // Store in object storage for persistence (stream the file instead of loading)
       try {
-        await objectStorageService.saveTickData(id, content, { rowCount, sampleRows });
+        const content = fs.readFileSync(persistentPath, "utf-8");
+        await objectStorageService.saveTickData(id, content, { rowCount: estimatedRowCount, sampleRows });
+        console.log(`Tick data ${id} saved to object storage`);
       } catch (storageError) {
-        console.warn("Object storage save failed, using memory only:", storageError);
+        console.warn("Object storage save failed, file remains on disk:", storageError);
       }
 
-      // Also store in memory for fast access
+      // Store in memory with file path only (no content to save memory)
       tickDataStore.add({
         id,
-        content,
-        rowCount,
+        content: "", // Don't store content in memory for large files
+        filePath: persistentPath,
+        rowCount: estimatedRowCount,
         sampleRows,
         uploadedAt: new Date(),
       });
       
-      // Clean up temp file and upload session
-      fs.unlinkSync(finalPath);
       chunkUploadStore.delete(uploadId);
       
-      return res.json({ id, rowCount, sampleRows });
+      return res.json({ id, rowCount: estimatedRowCount, sampleRows });
     } catch (error) {
       console.error("Finalize upload error:", error);
       return res.status(500).json({ 
@@ -443,45 +471,59 @@ export async function registerRoutes(
         fileStream.on("error", reject);
       });
       
-      // Read file content for database storage
-      const content = fs.readFileSync(filePath, "utf-8");
-      const lines = content.split("\n").filter(l => l.trim());
-      const rowCount = lines.length;
-      const sampleRows = lines.slice(0, 10);
+      const id = crypto.randomUUID();
+      
+      // Keep the file on disk for backtest access
+      const persistentPath = `/tmp/tick-uploads/${id}.csv`;
+      fs.renameSync(filePath, persistentPath);
+      
+      // Stream first N lines for preview without loading entire file into memory
+      const fileHandle = fs.openSync(persistentPath, "r");
+      const buffer = Buffer.alloc(64 * 1024);
+      const bytesRead = fs.readSync(fileHandle, buffer, 0, buffer.length, 0);
+      fs.closeSync(fileHandle);
+      
+      const preview = buffer.slice(0, bytesRead).toString("utf-8");
+      const previewLines = preview.split("\n").filter(l => l.trim());
+      const sampleRows = previewLines.slice(0, 10);
       
       // Check if we got HTML instead of CSV (common with Google Drive)
       if (sampleRows.length > 0) {
         const firstRow = sampleRows[0].toLowerCase();
         if (firstRow.includes("<!doctype") || firstRow.includes("<html") || firstRow.includes("<script") || firstRow.includes("_drive_")) {
-          fs.unlinkSync(filePath);
+          fs.unlinkSync(persistentPath);
           return res.status(400).json({
             error: "Received HTML page instead of CSV. Google Drive blocks large file downloads. Use the 'Upload File' tab instead.",
           });
         }
       }
       
-      const id = crypto.randomUUID();
+      const stat = fs.statSync(persistentPath);
+      const avgLineLen = preview.length / Math.max(previewLines.length, 1);
+      const rowCount = Math.ceil(stat.size / Math.max(avgLineLen, 50));
       
-      // Store in object storage for persistence
+      console.log(`Tick data ${id} saved to disk: ${persistentPath} (~${rowCount} rows)`);
+      
+      // Store in object storage for persistence across deployments
       try {
+        const content = fs.readFileSync(persistentPath, "utf-8");
         await objectStorageService.saveTickData(id, content, { rowCount, sampleRows });
+        console.log(`Tick data ${id} saved to object storage`);
       } catch (storageError) {
-        console.warn("Object storage save failed, using memory only:", storageError);
+        console.warn("Object storage save failed, file remains on disk:", storageError);
       }
 
-      // Also store in memory for fast access
+      // Store in memory with file path only (no content)
       tickDataStore.add({
         id,
-        content,
+        content: "",
+        filePath: persistentPath,
         rowCount,
         sampleRows,
         uploadedAt: new Date(),
       });
       
-      // Clean up temp file
-      fs.unlinkSync(filePath);
-      
-      return res.json({ id, rowCount, sampleRows, content });
+      return res.json({ id, rowCount, sampleRows });
     } catch (error) {
       console.error("URL upload error:", error);
       return res.status(500).json({ 

@@ -38,6 +38,7 @@ export const storage = new MemStorage();
 interface TickDataset {
   id: string;
   content: string;
+  filePath?: string; // Path to file on disk for large files
   rowCount: number;
   sampleRows: string[];
   uploadedAt: Date;
@@ -56,6 +57,10 @@ class TickDataStorage {
 
   delete(id: string): boolean {
     return this.datasets.delete(id);
+  }
+
+  getFilePath(id: string): string | undefined {
+    return this.datasets.get(id)?.filePath;
   }
 }
 

@@ -8,6 +8,7 @@ import type {
 } from "@shared/schema";
 import { tickDataStore } from "./storage";
 import { objectStorageService } from "./objectStorage";
+import fs from "fs";
 
 interface Tick {
   timestamp: Date;
@@ -158,24 +159,33 @@ function parseSignalTimestamp(timestamp: string): Date {
 async function* streamTicks(tickDataId: string, tickFormat: TickFormat, tickDataContent?: string): AsyncGenerator<Tick> {
   let content: string | null = null;
 
-  // Priority 1: Use content passed directly from client (most reliable)
-  if (tickDataContent) {
+  // Priority 1: Use content passed directly from client (for small files)
+  if (tickDataContent && tickDataContent.length > 0) {
     console.log(`Using tick data content sent directly from client`);
     content = tickDataContent;
   }
   
-  // Priority 2: Try in-memory store
+  // Priority 2: Try in-memory store (content)
   if (!content) {
     const dataset = tickDataStore.get(tickDataId);
-    if (dataset) {
+    if (dataset?.content) {
       console.log(`Using tick data from in-memory store`);
       content = dataset.content;
     }
   }
   
-  // Priority 3: Try object storage
+  // Priority 3: Try reading from disk (file path stored in memory)
   if (!content) {
-    console.log(`Tick data ${tickDataId} not in memory, checking object storage...`);
+    const filePath = tickDataStore.getFilePath(tickDataId);
+    if (filePath && fs.existsSync(filePath)) {
+      console.log(`Reading tick data from disk: ${filePath}`);
+      content = fs.readFileSync(filePath, "utf-8");
+    }
+  }
+  
+  // Priority 4: Try object storage
+  if (!content) {
+    console.log(`Tick data ${tickDataId} not in memory or disk, checking object storage...`);
     try {
       const storedData = await objectStorageService.getTickData(tickDataId);
       if (storedData) {

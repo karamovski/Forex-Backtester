@@ -11,6 +11,7 @@ import type {
 interface BacktestState {
   // Tick data setup
   tickDataId: string | null;
+  tickDataContent: string | null;
   tickDataLoaded: boolean;
   tickRowCount: number;
   tickSampleRows: string[];
@@ -41,6 +42,7 @@ interface BacktestState {
   
   // Actions
   setTickDataId: (id: string | null) => void;
+  setTickDataContent: (content: string | null) => void;
   setTickDataLoaded: (loaded: boolean, rowCount?: number) => void;
   setTickSampleRows: (rows: string[]) => void;
   setTickFormat: (format: TickFormat | null) => void;
@@ -82,6 +84,7 @@ const defaultRisk: RiskConfig = {
 export const useBacktestStore = create<BacktestState>((set) => ({
   // Initial state
   tickDataId: null,
+  tickDataContent: null,
   tickDataLoaded: false,
   tickRowCount: 0,
   tickSampleRows: [],
@@ -100,6 +103,7 @@ export const useBacktestStore = create<BacktestState>((set) => ({
   
   // Actions
   setTickDataId: (id) => set({ tickDataId: id }),
+  setTickDataContent: (content) => set({ tickDataContent: content }),
   setTickDataLoaded: (loaded, rowCount) => set({ tickDataLoaded: loaded, tickRowCount: rowCount ?? 0 }),
   setTickSampleRows: (rows) => set({ tickSampleRows: rows }),
   setTickFormat: (format) => set({ tickFormat: format }),
@@ -119,6 +123,7 @@ export const useBacktestStore = create<BacktestState>((set) => ({
   resetAll: () =>
     set({
       tickDataId: null,
+      tickDataContent: null,
       tickDataLoaded: false,
       tickRowCount: 0,
       tickSampleRows: [],

@@ -24,6 +24,7 @@ export default function Backtest() {
   const { toast } = useToast();
   const {
     tickDataId,
+    tickDataContent,
     tickDataLoaded,
     tickRowCount,
     tickFormat,
@@ -81,6 +82,7 @@ export default function Backtest() {
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/backtest/run", {
         tickDataId,
+        tickDataContent,
         tickFormat,
         strategy,
         risk,

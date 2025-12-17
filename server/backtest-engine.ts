@@ -155,26 +155,40 @@ function parseSignalTimestamp(timestamp: string): Date {
   );
 }
 
-async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGenerator<Tick> {
-  // First try in-memory store
-  let dataset = tickDataStore.get(tickDataId);
+async function* streamTicks(tickDataId: string, tickFormat: TickFormat, tickDataContent?: string): AsyncGenerator<Tick> {
+  let content: string | null = null;
+
+  // Priority 1: Use content passed directly from client (most reliable)
+  if (tickDataContent) {
+    console.log(`Using tick data content sent directly from client`);
+    content = tickDataContent;
+  }
   
-  // If not in memory, try object storage
-  if (!dataset) {
+  // Priority 2: Try in-memory store
+  if (!content) {
+    const dataset = tickDataStore.get(tickDataId);
+    if (dataset) {
+      console.log(`Using tick data from in-memory store`);
+      content = dataset.content;
+    }
+  }
+  
+  // Priority 3: Try object storage
+  if (!content) {
     console.log(`Tick data ${tickDataId} not in memory, checking object storage...`);
     try {
       const storedData = await objectStorageService.getTickData(tickDataId);
       if (storedData) {
         console.log(`Found tick data in object storage: ${storedData.rowCount} rows`);
-        dataset = {
+        content = storedData.content;
+        // Cache in memory for faster subsequent access
+        tickDataStore.add({
           id: tickDataId,
           content: storedData.content,
           rowCount: storedData.rowCount,
           sampleRows: storedData.sampleRows,
           uploadedAt: new Date(),
-        };
-        // Cache in memory for faster subsequent access
-        tickDataStore.add(dataset);
+        });
       } else {
         console.log(`Tick data ${tickDataId} not found in object storage`);
       }
@@ -183,11 +197,11 @@ async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGe
     }
   }
   
-  if (!dataset) {
+  if (!content) {
     throw new Error("Tick data not found. Please upload your tick data file on the Tick Data page.");
   }
 
-  const lines = dataset.content.split("\n");
+  const lines = content.split("\n");
   let lineNumber = 0;
 
   for (const line of lines) {
@@ -218,7 +232,8 @@ export async function runBacktest(
   signals: ParsedSignal[],
   strategy: StrategyConfig,
   riskConfig: RiskConfig,
-  gmtOffset: number
+  gmtOffset: number,
+  tickDataContent?: string
 ): Promise<BacktestResults> {
   if (!signals || signals.length === 0) {
     throw new Error("No signals provided for backtesting");
@@ -267,7 +282,7 @@ export async function runBacktest(
   let firstTickTime: Date | null = null;
   let lastTickTime: Date | null = null;
 
-  for await (const tick of streamTicks(tickDataId, tickFormat)) {
+  for await (const tick of streamTicks(tickDataId, tickFormat, tickDataContent)) {
     if (!firstTickTime) {
       firstTickTime = tick.timestamp;
       console.log(`First tick: ${firstTickTime.toISOString()}, bid: ${tick.bid}, ask: ${tick.ask}`);

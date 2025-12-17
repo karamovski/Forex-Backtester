@@ -185,6 +185,7 @@ export default function TickData() {
     tickSampleRows,
     tickFormat,
     setTickDataId,
+    setTickDataContent,
     setTickDataLoaded,
     setTickSampleRows,
     setTickFormat,
@@ -276,15 +277,32 @@ export default function TickData() {
     setUploadError(null);
 
     try {
-      // Use chunked upload for all files (safer for any size)
-      const response = await uploadChunked(file);
-      setTickDataId(response.id);
-      setTickSampleRows(response.sampleRows);
-      setTickDataLoaded(true, response.rowCount);
+      // Read file content directly in browser
+      const content = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setUploadProgress(Math.round((e.loaded / e.total) * 100));
+          }
+        };
+        reader.readAsText(file);
+      });
+
+      const lines = content.split("\n").filter(l => l.trim());
+      const rowCount = lines.length;
+      const sampleRows = lines.slice(0, 10);
+      const id = crypto.randomUUID();
+
+      setTickDataId(id);
+      setTickDataContent(content);
+      setTickSampleRows(sampleRows);
+      setTickDataLoaded(true, rowCount);
       setUploadProgress(100);
       setUploading(false);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Failed to upload file");
+      setUploadError(err instanceof Error ? err.message : "Failed to read file");
       setUploading(false);
     }
   };
@@ -297,7 +315,7 @@ export default function TickData() {
     setUploadError(null);
 
     try {
-      setUploadProgress(10); // Show some initial progress
+      setUploadProgress(10);
       
       const response = await fetch("/api/ticks/upload/url", {
         method: "POST",
@@ -314,6 +332,7 @@ export default function TickData() {
       
       const data = await response.json();
       setTickDataId(data.id);
+      setTickDataContent(data.content);
       setTickSampleRows(data.sampleRows);
       setTickDataLoaded(true, data.rowCount);
       setUploadProgress(100);

@@ -45,6 +45,7 @@ setInterval(() => {
 
 const runBacktestRequestSchema = z.object({
   tickDataId: z.string(),
+  tickDataContent: z.string().optional(),
   tickFormat: tickFormatSchema,
   strategy: strategyConfigSchema,
   risk: riskConfigSchema,
@@ -68,7 +69,7 @@ export async function registerRoutes(
         });
       }
       
-      const { tickDataId, tickFormat, parsedSignals, strategy, risk, gmtOffset } = validation.data;
+      const { tickDataId, tickDataContent, tickFormat, parsedSignals, strategy, risk, gmtOffset } = validation.data;
       
       if (parsedSignals.length === 0) {
         return res.status(400).json({
@@ -83,7 +84,8 @@ export async function registerRoutes(
         parsedSignals,
         strategy,
         risk,
-        gmtOffset
+        gmtOffset,
+        tickDataContent
       );
       
       return res.json(results);
@@ -479,7 +481,7 @@ export async function registerRoutes(
       // Clean up temp file
       fs.unlinkSync(filePath);
       
-      return res.json({ id, rowCount, sampleRows });
+      return res.json({ id, rowCount, sampleRows, content });
     } catch (error) {
       console.error("URL upload error:", error);
       return res.status(500).json({ 

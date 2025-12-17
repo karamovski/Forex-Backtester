@@ -156,16 +156,17 @@ function parseSignalTimestamp(timestamp: string): Date {
   );
 }
 
-async function* streamTicks(tickDataId: string, tickFormat: TickFormat, tickDataContent?: string): AsyncGenerator<Tick> {
+async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGenerator<Tick> {
   let content: string | null = null;
 
-  // Priority 1: Use content passed directly from client (for small files)
-  if (tickDataContent && tickDataContent.length > 0) {
-    console.log(`Using tick data content sent directly from client`);
-    content = tickDataContent;
+  // Priority 1: Try reading from disk (file path stored in memory)
+  const filePath = tickDataStore.getFilePath(tickDataId);
+  if (filePath && fs.existsSync(filePath)) {
+    console.log(`Reading tick data from disk: ${filePath}`);
+    content = fs.readFileSync(filePath, "utf-8");
   }
   
-  // Priority 2: Try in-memory store (content)
+  // Priority 2: Try in-memory store (for small files that might have content)
   if (!content) {
     const dataset = tickDataStore.get(tickDataId);
     if (dataset?.content) {
@@ -174,16 +175,7 @@ async function* streamTicks(tickDataId: string, tickFormat: TickFormat, tickData
     }
   }
   
-  // Priority 3: Try reading from disk (file path stored in memory)
-  if (!content) {
-    const filePath = tickDataStore.getFilePath(tickDataId);
-    if (filePath && fs.existsSync(filePath)) {
-      console.log(`Reading tick data from disk: ${filePath}`);
-      content = fs.readFileSync(filePath, "utf-8");
-    }
-  }
-  
-  // Priority 4: Try object storage
+  // Priority 3: Try object storage
   if (!content) {
     console.log(`Tick data ${tickDataId} not in memory or disk, checking object storage...`);
     try {
@@ -191,10 +183,13 @@ async function* streamTicks(tickDataId: string, tickFormat: TickFormat, tickData
       if (storedData) {
         console.log(`Found tick data in object storage: ${storedData.rowCount} rows`);
         content = storedData.content;
-        // Cache in memory for faster subsequent access
+        // Save to disk for faster subsequent access
+        const cacheFilePath = `/tmp/tick-uploads/${tickDataId}.csv`;
+        fs.writeFileSync(cacheFilePath, content);
         tickDataStore.add({
           id: tickDataId,
-          content: storedData.content,
+          content: "",
+          filePath: cacheFilePath,
           rowCount: storedData.rowCount,
           sampleRows: storedData.sampleRows,
           uploadedAt: new Date(),
@@ -242,8 +237,7 @@ export async function runBacktest(
   signals: ParsedSignal[],
   strategy: StrategyConfig,
   riskConfig: RiskConfig,
-  gmtOffset: number,
-  tickDataContent?: string
+  gmtOffset: number
 ): Promise<BacktestResults> {
   if (!signals || signals.length === 0) {
     throw new Error("No signals provided for backtesting");
@@ -292,7 +286,7 @@ export async function runBacktest(
   let firstTickTime: Date | null = null;
   let lastTickTime: Date | null = null;
 
-  for await (const tick of streamTicks(tickDataId, tickFormat, tickDataContent)) {
+  for await (const tick of streamTicks(tickDataId, tickFormat)) {
     if (!firstTickTime) {
       firstTickTime = tick.timestamp;
       console.log(`First tick: ${firstTickTime.toISOString()}, bid: ${tick.bid}, ask: ${tick.ask}`);

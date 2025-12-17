@@ -1,13 +1,11 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage, tickDataStore } from "./storage";
+import { storage } from "./storage";
 import { runBacktest } from "./backtest-engine";
 import { z } from "zod";
 import multer from "multer";
 import fs from "fs";
 import path from "path";
-import { createReadStream } from "fs";
-import { parse } from "csv-parse";
 import {
   tickFormatSchema,
   signalFormatSchema,
@@ -151,52 +149,26 @@ export async function registerRoutes(
       }
 
       const filePath = req.file.path;
-      let rowCount = 0;
-      const sampleRows: string[] = [];
+      const fileName = req.file.originalname || "uploaded.csv";
+      
+      // Read entire file content for database storage
+      const content = fs.readFileSync(filePath, "utf-8");
+      const lines = content.split("\n").filter(l => l.trim());
+      const rowCount = lines.length;
+      const sampleRows = lines.slice(0, 10);
 
-      // Count rows and collect samples
-      await new Promise<void>((resolve, reject) => {
-        const stream = createReadStream(filePath, { encoding: "utf-8" });
-        let buffer = "";
-        
-        stream.on("data", (chunk: string) => {
-          buffer += chunk;
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          
-          for (const line of lines) {
-            if (line.trim()) {
-              rowCount++;
-              if (sampleRows.length < 10) {
-                sampleRows.push(line.trim());
-              }
-            }
-          }
-        });
-        
-        stream.on("end", () => {
-          if (buffer.trim()) {
-            rowCount++;
-            if (sampleRows.length < 10) {
-              sampleRows.push(buffer.trim());
-            }
-          }
-          resolve();
-        });
-        
-        stream.on("error", reject);
-      });
-
-      const id = crypto.randomUUID();
-      tickDataStore.add({
-        id,
-        filePath,
+      // Store in database
+      const tickDataRecord = await storage.createTickData({
+        filename: fileName,
+        content,
         rowCount,
         sampleRows,
-        uploadedAt: new Date(),
       });
 
-      return res.json({ id, rowCount, sampleRows });
+      // Clean up temp file
+      fs.unlinkSync(filePath);
+
+      return res.json({ id: tickDataRecord.id, rowCount, sampleRows });
     } catch (error) {
       console.error("Upload error:", error);
       return res.status(500).json({
@@ -302,41 +274,11 @@ export async function registerRoutes(
         writeStream.on("error", reject);
       });
       
-      // Process the combined file (count rows, get samples)
-      let rowCount = 0;
-      const sampleRows: string[] = [];
-      
-      await new Promise<void>((resolve, reject) => {
-        const stream = createReadStream(finalPath, { encoding: "utf-8" });
-        let buffer = "";
-        
-        stream.on("data", (chunk: string) => {
-          buffer += chunk;
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          
-          for (const line of lines) {
-            if (line.trim()) {
-              rowCount++;
-              if (sampleRows.length < 10) {
-                sampleRows.push(line.trim());
-              }
-            }
-          }
-        });
-        
-        stream.on("end", () => {
-          if (buffer.trim()) {
-            rowCount++;
-            if (sampleRows.length < 10) {
-              sampleRows.push(buffer.trim());
-            }
-          }
-          resolve();
-        });
-        
-        stream.on("error", reject);
-      });
+      // Read file content for database storage
+      const content = fs.readFileSync(finalPath, "utf-8");
+      const lines = content.split("\n").filter(l => l.trim());
+      const rowCount = lines.length;
+      const sampleRows = lines.slice(0, 10);
       
       // Check if we got HTML instead of CSV (common with Google Drive)
       if (sampleRows.length > 0) {
@@ -350,19 +292,19 @@ export async function registerRoutes(
         }
       }
       
-      const id = crypto.randomUUID();
-      tickDataStore.add({
-        id,
-        filePath: finalPath,
+      // Store in database
+      const tickDataRecord = await storage.createTickData({
+        filename: uploadData.fileName,
+        content,
         rowCount,
         sampleRows,
-        uploadedAt: new Date(),
       });
       
-      // Clean up upload session
+      // Clean up temp file and upload session
+      fs.unlinkSync(finalPath);
       chunkUploadStore.delete(uploadId);
       
-      return res.json({ id, rowCount, sampleRows });
+      return res.json({ id: tickDataRecord.id, rowCount, sampleRows });
     } catch (error) {
       console.error("Finalize upload error:", error);
       return res.status(500).json({ 
@@ -476,41 +418,11 @@ export async function registerRoutes(
         fileStream.on("error", reject);
       });
       
-      // Process the file (count rows, get samples)
-      let rowCount = 0;
-      const sampleRows: string[] = [];
-      
-      await new Promise<void>((resolve, reject) => {
-        const stream = createReadStream(filePath, { encoding: "utf-8" });
-        let buffer = "";
-        
-        stream.on("data", (chunk: string) => {
-          buffer += chunk;
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          
-          for (const line of lines) {
-            if (line.trim()) {
-              rowCount++;
-              if (sampleRows.length < 10) {
-                sampleRows.push(line.trim());
-              }
-            }
-          }
-        });
-        
-        stream.on("end", () => {
-          if (buffer.trim()) {
-            rowCount++;
-            if (sampleRows.length < 10) {
-              sampleRows.push(buffer.trim());
-            }
-          }
-          resolve();
-        });
-        
-        stream.on("error", reject);
-      });
+      // Read file content for database storage
+      const content = fs.readFileSync(filePath, "utf-8");
+      const lines = content.split("\n").filter(l => l.trim());
+      const rowCount = lines.length;
+      const sampleRows = lines.slice(0, 10);
       
       // Check if we got HTML instead of CSV (common with Google Drive)
       if (sampleRows.length > 0) {
@@ -523,16 +435,21 @@ export async function registerRoutes(
         }
       }
       
-      const id = crypto.randomUUID();
-      tickDataStore.add({
-        id,
-        filePath,
+      // Extract filename from URL
+      const urlFileName = url.split("/").pop()?.split("?")[0] || "url-download.csv";
+      
+      // Store in database
+      const tickDataRecord = await storage.createTickData({
+        filename: urlFileName,
+        content,
         rowCount,
         sampleRows,
-        uploadedAt: new Date(),
       });
       
-      return res.json({ id, rowCount, sampleRows });
+      // Clean up temp file
+      fs.unlinkSync(filePath);
+      
+      return res.json({ id: tickDataRecord.id, rowCount, sampleRows });
     } catch (error) {
       console.error("URL upload error:", error);
       return res.status(500).json({ 

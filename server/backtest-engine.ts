@@ -6,8 +6,7 @@ import type {
   TradeResult,
   BacktestResults,
 } from "@shared/schema";
-import { createReadStream } from "fs";
-import { tickDataStore } from "./storage";
+import { storage } from "./storage";
 
 interface Tick {
   timestamp: Date;
@@ -156,59 +155,33 @@ function parseSignalTimestamp(timestamp: string): Date {
 }
 
 async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGenerator<Tick> {
-  const dataset = tickDataStore.get(tickDataId);
+  const dataset = await storage.getTickData(tickDataId);
   if (!dataset) {
-    throw new Error("Tick data not found. Please re-upload your tick data file on the Tick Data page.");
+    throw new Error("Tick data not found. Please upload your tick data file on the Tick Data page.");
   }
 
-  // Check if file still exists (may be deleted after server restart/redeploy)
-  const fs = await import("fs");
-  if (!fs.existsSync(dataset.filePath)) {
-    throw new Error("Tick data file no longer exists. After publishing, you need to re-upload your tick data file on the Tick Data page.");
-  }
-
-  const stream = createReadStream(dataset.filePath, { encoding: "utf-8" });
-  let buffer = "";
+  const lines = dataset.content.split("\n");
   let lineNumber = 0;
 
-  for await (const chunk of stream) {
-    buffer += chunk;
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
+  for (const line of lines) {
+    lineNumber++;
+    if (lineNumber === 1 && tickFormat.hasHeader) continue;
+    if (!line.trim()) continue;
 
-    for (const line of lines) {
-      lineNumber++;
-      if (lineNumber === 1 && tickFormat.hasHeader) continue;
-      if (!line.trim()) continue;
-
-      const cols = line.split(tickFormat.delimiter);
-      const dateStr = cols[tickFormat.dateColumn]?.trim() || "";
-      const timeStr = cols[tickFormat.timeColumn]?.trim() || "";
-      const bidStr = cols[tickFormat.bidColumn]?.trim() || "";
-      const askStr = cols[tickFormat.askColumn]?.trim() || "";
-
-      const bid = parseFloat(bidStr);
-      const ask = parseFloat(askStr);
-
-      if (isNaN(bid) || isNaN(ask)) continue;
-
-      const timestamp = parseTimestamp(dateStr, timeStr, tickFormat.dateFormat, tickFormat.timeFormat);
-
-      yield { timestamp, bid, ask };
-    }
-  }
-
-  if (buffer.trim()) {
-    const cols = buffer.split(tickFormat.delimiter);
+    const cols = line.split(tickFormat.delimiter);
     const dateStr = cols[tickFormat.dateColumn]?.trim() || "";
     const timeStr = cols[tickFormat.timeColumn]?.trim() || "";
-    const bid = parseFloat(cols[tickFormat.bidColumn]?.trim() || "");
-    const ask = parseFloat(cols[tickFormat.askColumn]?.trim() || "");
+    const bidStr = cols[tickFormat.bidColumn]?.trim() || "";
+    const askStr = cols[tickFormat.askColumn]?.trim() || "";
 
-    if (!isNaN(bid) && !isNaN(ask)) {
-      const timestamp = parseTimestamp(dateStr, timeStr, tickFormat.dateFormat, tickFormat.timeFormat);
-      yield { timestamp, bid, ask };
-    }
+    const bid = parseFloat(bidStr);
+    const ask = parseFloat(askStr);
+
+    if (isNaN(bid) || isNaN(ask)) continue;
+
+    const timestamp = parseTimestamp(dateStr, timeStr, tickFormat.dateFormat, tickFormat.timeFormat);
+
+    yield { timestamp, bid, ask };
   }
 }
 

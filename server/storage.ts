@@ -1,65 +1,52 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { type User, type InsertUser, type TickData, type InsertTickData, users, tickData } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  
+  getTickData(id: string): Promise<TickData | undefined>;
+  getAllTickData(): Promise<TickData[]>;
+  createTickData(data: InsertTickData): Promise<TickData>;
+  deleteTickData(id: string): Promise<boolean>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
-  }
-
+export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
+    const [user] = await db.insert(users).values(insertUser).returning();
     return user;
   }
-}
 
-export const storage = new MemStorage();
-
-// Tick data store - tracks uploaded tick files
-interface TickDataset {
-  id: string;
-  filePath: string;
-  rowCount: number;
-  sampleRows: string[];
-  uploadedAt: Date;
-}
-
-class TickDataStorage {
-  private datasets: Map<string, TickDataset> = new Map();
-
-  add(dataset: TickDataset): void {
-    this.datasets.set(dataset.id, dataset);
+  async getTickData(id: string): Promise<TickData | undefined> {
+    const [data] = await db.select().from(tickData).where(eq(tickData.id, id));
+    return data || undefined;
   }
 
-  get(id: string): TickDataset | undefined {
-    return this.datasets.get(id);
+  async getAllTickData(): Promise<TickData[]> {
+    return await db.select().from(tickData);
   }
 
-  delete(id: string): boolean {
-    return this.datasets.delete(id);
+  async createTickData(data: InsertTickData): Promise<TickData> {
+    const [created] = await db.insert(tickData).values(data).returning();
+    return created;
+  }
+
+  async deleteTickData(id: string): Promise<boolean> {
+    const result = await db.delete(tickData).where(eq(tickData.id, id)).returning();
+    return result.length > 0;
   }
 }
 
-export const tickDataStore = new TickDataStorage();
+export const storage = new DatabaseStorage();

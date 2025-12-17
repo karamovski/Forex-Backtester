@@ -158,9 +158,9 @@ export const runBacktestRequestSchema = backtestConfigSchema;
 
 export type RunBacktestRequest = z.infer<typeof runBacktestRequestSchema>;
 
-// Placeholder for users table (keeping for compatibility)
+// Database tables
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 
 export const users = pgTable("users", {
@@ -176,3 +176,21 @@ export const insertUserSchema = createInsertSchema(users).pick({
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
+
+// Tick data storage - stores uploaded tick files persistently
+export const tickData = pgTable("tick_data", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  filename: text("filename").notNull(),
+  content: text("content").notNull(),
+  rowCount: integer("row_count").notNull(),
+  sampleRows: text("sample_rows").array().notNull(),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+});
+
+export const insertTickDataSchema = createInsertSchema(tickData).omit({
+  id: true,
+  uploadedAt: true,
+});
+
+export type InsertTickData = z.infer<typeof insertTickDataSchema>;
+export type TickData = typeof tickData.$inferSelect;

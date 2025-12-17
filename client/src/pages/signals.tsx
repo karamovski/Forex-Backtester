@@ -402,7 +402,13 @@ export default function Signals() {
                             {signal.direction.toUpperCase()}
                           </Badge>
                         </td>
-                        <td className="px-4 py-2 text-right">{signal.entryPrice.toFixed(5)}</td>
+                        <td className="px-4 py-2 text-right">
+                          {signal.entryPrice === 0 ? (
+                            <span className="text-muted-foreground italic">Market</span>
+                          ) : (
+                            signal.entryPrice.toFixed(5)
+                          )}
+                        </td>
                         <td className="px-4 py-2 text-right">{signal.stopLoss.toFixed(5)}</td>
                         <td className="px-4 py-2 text-right">{signal.takeProfits[0]?.toFixed(5) || "-"}</td>
                         <td className="px-4 py-2 text-right">{signal.takeProfits[1]?.toFixed(5) || "-"}</td>

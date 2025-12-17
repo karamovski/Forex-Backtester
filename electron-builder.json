@@ -10,7 +10,7 @@
     "electron-build/**/*"
   ],
   "extraMetadata": {
-    "main": "electron-build/main.js"
+    "main": "electron-build/main.cjs"
   },
   "win": {
     "target": [

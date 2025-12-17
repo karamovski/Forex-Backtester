@@ -14,7 +14,7 @@ async function buildElectron() {
     bundle: true,
     platform: "node",
     target: "node18",
-    outfile: "electron-build/main.js",
+    outfile: "electron-build/main.cjs",
     external: ["electron"],
     format: "cjs",
   });
@@ -26,7 +26,7 @@ async function buildElectron() {
     bundle: true,
     platform: "node",
     target: "node18",
-    outfile: "electron-build/preload.js",
+    outfile: "electron-build/preload.cjs",
     external: ["electron"],
     format: "cjs",
   });

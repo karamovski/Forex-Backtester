@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage, tickDataStore } from "./storage";
+import { objectStorageService } from "./objectStorage";
 import { runBacktest } from "./backtest-engine";
 import { z } from "zod";
 import multer from "multer";
@@ -157,8 +158,16 @@ export async function registerRoutes(
       const rowCount = lines.length;
       const sampleRows = lines.slice(0, 10);
 
-      // Store in memory
       const id = crypto.randomUUID();
+      
+      // Store in object storage for persistence
+      try {
+        await objectStorageService.saveTickData(id, content, { rowCount, sampleRows });
+      } catch (storageError) {
+        console.warn("Object storage save failed, using memory only:", storageError);
+      }
+
+      // Also store in memory for fast access
       tickDataStore.add({
         id,
         content,
@@ -294,8 +303,16 @@ export async function registerRoutes(
         }
       }
       
-      // Store in memory
       const id = crypto.randomUUID();
+      
+      // Store in object storage for persistence
+      try {
+        await objectStorageService.saveTickData(id, content, { rowCount, sampleRows });
+      } catch (storageError) {
+        console.warn("Object storage save failed, using memory only:", storageError);
+      }
+
+      // Also store in memory for fast access
       tickDataStore.add({
         id,
         content,
@@ -439,8 +456,16 @@ export async function registerRoutes(
         }
       }
       
-      // Store in memory
       const id = crypto.randomUUID();
+      
+      // Store in object storage for persistence
+      try {
+        await objectStorageService.saveTickData(id, content, { rowCount, sampleRows });
+      } catch (storageError) {
+        console.warn("Object storage save failed, using memory only:", storageError);
+      }
+
+      // Also store in memory for fast access
       tickDataStore.add({
         id,
         content,

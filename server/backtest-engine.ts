@@ -7,6 +7,7 @@ import type {
   BacktestResults,
 } from "@shared/schema";
 import { tickDataStore } from "./storage";
+import { objectStorageService } from "./objectStorage";
 
 interface Tick {
   timestamp: Date;
@@ -155,7 +156,29 @@ function parseSignalTimestamp(timestamp: string): Date {
 }
 
 async function* streamTicks(tickDataId: string, tickFormat: TickFormat): AsyncGenerator<Tick> {
-  const dataset = tickDataStore.get(tickDataId);
+  // First try in-memory store
+  let dataset = tickDataStore.get(tickDataId);
+  
+  // If not in memory, try object storage
+  if (!dataset) {
+    try {
+      const storedData = await objectStorageService.getTickData(tickDataId);
+      if (storedData) {
+        dataset = {
+          id: tickDataId,
+          content: storedData.content,
+          rowCount: storedData.rowCount,
+          sampleRows: storedData.sampleRows,
+          uploadedAt: new Date(),
+        };
+        // Cache in memory for faster subsequent access
+        tickDataStore.add(dataset);
+      }
+    } catch (err) {
+      console.warn("Object storage lookup failed:", err);
+    }
+  }
+  
   if (!dataset) {
     throw new Error("Tick data not found. Please upload your tick data file on the Tick Data page.");
   }

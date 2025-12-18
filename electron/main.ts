@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, protocol } from "electron";
 import * as path from "path";
 import * as fs from "fs";
 import * as readline from "readline";
+import { pathToFileURL } from "url";
 import {
   Tick,
   runBacktestCore,
@@ -51,6 +52,33 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!isDev) {
+    protocol.interceptFileProtocol("file", (request, callback) => {
+      let url = request.url.substring(7);
+      
+      if (process.platform === "win32" && url.startsWith("/")) {
+        url = url.substring(1);
+      }
+      
+      url = decodeURIComponent(url);
+      
+      if (url.startsWith("/assets/") || url.match(/^[A-Za-z]:.*\\assets\\/)) {
+        const assetPath = url.includes("assets") 
+          ? url.substring(url.indexOf("assets"))
+          : url;
+        const baseDir = path.join(__dirname, "../dist/public");
+        const fullPath = path.join(baseDir, assetPath);
+        
+        if (fs.existsSync(fullPath)) {
+          callback({ path: fullPath });
+          return;
+        }
+      }
+      
+      callback({ path: url });
+    });
+  }
+  
   createWindow();
 
   app.on("activate", () => {
